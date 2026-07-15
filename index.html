@@ -367,6 +367,16 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
     return `${y}-${m}-${dd}`;
   }
+  // Mantém a fórmula da folha Excel original ("=(D-180)"): a próxima
+  // refidelização é sempre a data de fim de fidelização menos 180 dias (~6 meses).
+  const PROX_REFID_DAYS_BEFORE_FIM = 180;
+  function isoMinusDays(iso, days){
+    const d = parseISO(iso);
+    if(!d) return '';
+    const d2 = new Date(d.getTime() - days*86400000);
+    const y=d2.getFullYear(), m=String(d2.getMonth()+1).padStart(2,'0'), dd=String(d2.getDate()).padStart(2,'0');
+    return `${y}-${m}-${dd}`;
+  }
   function esc(s){
     return String(s==null? '': s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   }
@@ -833,6 +843,11 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         newTr.querySelector('.nf-cliente').focus();
         newTr.querySelector('.create-cancel-btn').addEventListener('click', ()=>{ creatingNew = false; render(); });
         newTr.querySelector('.create-save-btn').addEventListener('click', (e)=> createRecord(newTr, e.currentTarget));
+        newTr.querySelector('.nf-fim').addEventListener('change', ()=>{
+          const fimVal = newTr.querySelector('.nf-fim').value;
+          const proxInp = newTr.querySelector('.nf-prox');
+          if(proxInp && fimVal) proxInp.value = isoMinusDays(fimVal, PROX_REFID_DAYS_BEFORE_FIM);
+        });
       }
 
       tableWrap.querySelectorAll('th[data-key]').forEach(th=>{
@@ -856,6 +871,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           editingRowNum = +btn.closest('tr').getAttribute('data-row');
           confirmingDeleteRowNum = null;
           render();
+        });
+      });
+      // Tal como na folha Excel original, mudar a data de Fim de fidelização
+      // recalcula automaticamente a Próxima refidelização (fim - 180 dias).
+      tableWrap.querySelectorAll('.f-fim').forEach(inp=>{
+        inp.addEventListener('change', ()=>{
+          const proxInp = inp.closest('tr').querySelector('.f-prox');
+          if(proxInp && inp.value) proxInp.value = isoMinusDays(inp.value, PROX_REFID_DAYS_BEFORE_FIM);
         });
       });
       tableWrap.querySelectorAll('.cancel-row-btn').forEach(btn=>{
