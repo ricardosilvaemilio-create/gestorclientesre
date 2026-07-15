@@ -160,11 +160,11 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     <p>Este painel não guarda dados de clientes no código — liga-se em direto à tua Google Sheet através do Apps Script. Introduz o URL e o token que configuraste (ver o ficheiro Code.gs).</p>
     <div class="field">
       <label for="apiUrl">URL da aplicação Web (Apps Script)</label>
-      <input id="apiUrl" type="text" placeholder="https://script.google.com/macros/s/…/exec">
+      <input id="apiUrl" type="text" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
     </div>
     <div class="field">
       <label for="apiToken">Token de acesso</label>
-      <input id="apiToken" type="password" placeholder="o teu token">
+      <input id="apiToken" type="password" placeholder="o teu token" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
     </div>
     <button class="btn primary" id="connectBtn">Ligar</button>
     <div class="error" id="gateError"></div>
@@ -305,15 +305,24 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     return { api: p.get('api')||'', token: p.get('token')||'' };
   }
   const initial = paramsFromLocation();
-  if(initial.api) document.getElementById('apiUrl').value = initial.api;
-  if(initial.token) document.getElementById('apiToken').value = initial.token;
+  // Só pré-preenchemos os campos visíveis quando NÃO vamos ligar automaticamente —
+  // se ligarmos automaticamente a partir do URL, usamos os valores da query string
+  // diretamente (sem passar pelos <input>), para o autofill do navegador nunca
+  // ter oportunidade de sobrepor o token com um valor guardado antigo.
+  if(initial.api && initial.token){
+    connect(initial.api, initial.token);
+  } else {
+    if(initial.api) document.getElementById('apiUrl').value = initial.api;
+    if(initial.token) document.getElementById('apiToken').value = initial.token;
+  }
 
-  document.getElementById('connectBtn').addEventListener('click', connect);
-  if(initial.api && initial.token){ connect(); }
+  document.getElementById('connectBtn').addEventListener('click', ()=>{
+    connect(document.getElementById('apiUrl').value.trim(), document.getElementById('apiToken').value.trim());
+  });
 
-  function connect(){
-    API_URL = document.getElementById('apiUrl').value.trim();
-    TOKEN = document.getElementById('apiToken').value.trim();
+  function connect(apiUrl, token){
+    API_URL = (apiUrl||'').trim();
+    TOKEN = (token||'').trim();
     gateError.classList.remove('show');
     if(!API_URL || !TOKEN){
       gateError.textContent = 'Preenche o URL e o token.';
