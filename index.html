@@ -57,12 +57,6 @@ h1{font-size:20px; margin:0 0 4px;}
 .tile.active{outline:2px solid var(--blue);}
 .tile .label{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); font-weight:600; text-transform:uppercase; letter-spacing:.02em;}
 .tile .value{font-size:28px; font-weight:700; margin-top:6px; font-variant-numeric:tabular-nums;}
-.tile input[type=number]{
-  font-size:28px; font-weight:700; margin-top:6px; font-variant-numeric:tabular-nums;
-  width:100%; border:1px solid var(--baseline); border-radius:8px; padding:2px 8px;
-  background:var(--surface-1); color:var(--text-primary);
-}
-.tile input[type=number]:focus{outline:2px solid var(--blue); outline-offset:1px;}
 .dot{width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0;}
 .dot.critical{background:var(--critical);} .dot.warning{background:var(--warning);}
 .dot.good{background:var(--blue);} .dot.muted{background:var(--text-muted);}
@@ -110,11 +104,17 @@ td.contact div{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 td.obs{max-width:280px; color:var(--text-secondary); font-size:12.5px;}
 td.dates{white-space:nowrap; font-variant-numeric:tabular-nums; font-size:12.5px;}
 td.dates .days{display:block; font-size:11px; margin-top:2px;}
+td.estado{white-space:nowrap; font-size:12.5px;}
 
 .obs-text{white-space:pre-wrap; min-height:18px; border-radius:6px; padding:3px 5px; margin:-3px -5px;}
+.estado-pill{
+  display:inline-block; padding:2px 9px; border-radius:100px; background:var(--blue-bg); color:var(--blue);
+  font-size:11.5px; font-weight:600; white-space:nowrap;
+}
+.estado-date{display:block; font-size:11px; color:var(--text-muted); margin-top:3px;}
 
 tr.editing{background:var(--blue-bg);}
-td input[type=text], td input[type=date]{
+td input[type=text], td input[type=date], td select{
   width:100%; padding:5px 7px; border:1px solid var(--baseline); border-radius:6px;
   font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary);
 }
@@ -123,12 +123,16 @@ td textarea{
   font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary); resize:vertical;
 }
 .contact-edit{display:flex; flex-direction:column; gap:4px;}
-td.actions{white-space:nowrap;}
-.edit-row-btn, .save-row-btn, .cancel-row-btn{
+td.actions{white-space:nowrap; min-width:110px;}
+.edit-row-btn, .save-row-btn, .cancel-row-btn, .delete-row-btn, .delete-confirm-btn, .delete-cancel-btn{
   font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--baseline);
   background:var(--surface-1); cursor:pointer; display:block; width:100%; margin-bottom:4px;
 }
 .save-row-btn{background:var(--blue); color:#fff; border-color:var(--blue);}
+.delete-row-btn, .delete-confirm-btn{color:var(--critical); border-color:var(--critical);}
+.delete-confirm-btn{background:var(--critical); color:#fff;}
+.delete-confirm{font-size:11px; color:var(--critical); margin-bottom:6px; line-height:1.4;}
+tr.deleting{background:var(--critical-bg);}
 .save-flag{font-size:10.5px; color:var(--good); margin-left:6px; display:block; margin-top:4px;}
 .save-flag.error{color:var(--critical);}
 
@@ -205,7 +209,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
         <input id="search" type="text" placeholder="Cliente, NIF, contacto, e-mail, subagente, observações…">
       </div>
       <div class="field">
-        <label for="statusFilter">Estado</label>
+        <label for="statusFilter">Estado da fidelização</label>
         <select id="statusFilter">
           <option value="">Todos</option>
           <option value="atrasado">Atrasado</option>
@@ -223,8 +227,15 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
         <input id="subFilter" type="text" list="subList" placeholder="Todos">
         <datalist id="subList"></datalist>
       </div>
+      <div class="field">
+        <label for="estadoContatoFilter">Estado do contacto</label>
+        <select id="estadoContatoFilter">
+          <option value="">Todos</option>
+          <option value="__vazio__">Sem estado</option>
+        </select>
+      </div>
       <button class="btn" id="clearFilters">Limpar filtros</button>
-      <button class="btn primary" id="exportCsv">Exportar CSV (filtrado)</button>
+      <button class="btn primary" id="exportCsv">Exportar ficheiro XLS (filtrado)</button>
     </div>
 
     <p class="summary-line"><span class="sync-dot" id="syncDot"></span><span id="summaryLine"></span></p>
@@ -243,9 +254,10 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
   </div>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>
 (function(){
-  let ALERT_WINDOW_DAYS = 180; // ajustável pelo utilizador na caixa "Personalizar dias"
+  const ALERT_WINDOW_DAYS = 180; // dias de antecedência antes do fim da fidelização
   let API_URL = '';
   let TOKEN = '';
   let records = [];
@@ -255,8 +267,12 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
   let page = 1;
   const pageSize = 50;
 
-  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes'];
-  // row array from Apps Script: [rowNum, A..Q] -> index i+1 = COLS[i]
+  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data'];
+  // row array from Apps Script: [rowNum, A..S] -> index i+1 = COLS[i]
+  // estado_contato = coluna R, estado_data = coluna S (têm de existir na folha — ver Code.gs).
+
+  // Hipóteses do "Estado do contacto" — para adicionar mais opções, acrescenta aqui.
+  const ESTADO_OPTIONS = ['Em negociação', 'Aguardo documentação', 'Concluído'];
 
   function stripAccents(s){ return s.normalize('NFD').replace(/[̀-ͯ]/g,''); }
   function parseISO(s){
@@ -270,6 +286,11 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     const dd = String(d.getDate()).padStart(2,'0');
     const mm = String(d.getMonth()+1).padStart(2,'0');
     return `${dd}/${mm}/${d.getFullYear()}`;
+  }
+  function todayISO(){
+    const d = new Date();
+    const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${dd}`;
   }
   function esc(s){
     return String(s==null? '': s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -302,20 +323,12 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
       tarifario, tarifNorm: tarifario.trim().toUpperCase(),
       localidade: get('localidade')||'', contato: get('contato')||'', email: get('email')||'',
       telemovel: get('telemovel')||'', observacoes: get('observacoes')||'',
+      estadoContato: get('estado_contato')||'', estadoData: get('estado_data')||'',
       fimDate, fimRaw, proxDate, proxRaw,
       status: s.status, statusLabel: s.statusLabel, days
     };
-    rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes).toLowerCase());
+    rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
     return rec;
-  }
-
-  function recomputeStatuses(){
-    records.forEach(r=>{
-      const s = statusFromDays(r.days, r.fimRaw);
-      r.status = s.status;
-      r.statusLabel = s.statusLabel;
-    });
-    applyFilters();
   }
 
   // ---------- Gate / connection ----------
@@ -418,8 +431,9 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
   // ---------- App ----------
   let tarifSelEl, subListEl, tilesWrap, activeStatus = '';
   const tilesDef = [
-    {key:'alerta', label:'Em alerta', dot:'warning', desc:'dentro do limite escolhido'},
-    {key:'futuro', label:'Futuro', dot:'good', desc:'além do limite escolhido'},
+    {key:'atrasado', label:'Atrasado', dot:'critical', desc:'já passou a data'},
+    {key:'alerta', label:'Em alerta', dot:'warning', desc:`dentro de ${ALERT_WINDOW_DAYS} dias`},
+    {key:'futuro', label:'Futuro', dot:'good', desc:`além de ${ALERT_WINDOW_DAYS} dias`},
     {key:'outro', label:'Sem fidelização / outro', dot:'muted', desc:'sem data associada'},
   ];
 
@@ -428,17 +442,26 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     subListEl = document.getElementById('subList');
     tilesWrap = document.getElementById('tiles');
 
+    const estadoFilterEl = document.getElementById('estadoContatoFilter');
+    ESTADO_OPTIONS.forEach(opt=>{
+      const o = document.createElement('option');
+      o.value = opt; o.textContent = opt;
+      estadoFilterEl.appendChild(o);
+    });
+
     populateFilterOptions();
 
     document.getElementById('search').addEventListener('input', debounce(applyFilters,150));
     document.getElementById('statusFilter').addEventListener('change', applyFilters);
     tarifSelEl.addEventListener('change', applyFilters);
     document.getElementById('subFilter').addEventListener('input', debounce(applyFilters,150));
+    estadoFilterEl.addEventListener('change', applyFilters);
     document.getElementById('clearFilters').addEventListener('click', ()=>{
       document.getElementById('search').value='';
       document.getElementById('statusFilter').value='';
       tarifSelEl.value='';
       document.getElementById('subFilter').value='';
+      estadoFilterEl.value='';
       activeStatus='';
       applyFilters();
     });
@@ -447,7 +470,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
       const totalPages = Math.max(1, Math.ceil(filtered.length/pageSize));
       if(page<totalPages){page++; render();}
     });
-    document.getElementById('exportCsv').addEventListener('click', exportCsv);
+    document.getElementById('exportCsv').addEventListener('click', exportXls);
     document.getElementById('themeToggle').addEventListener('click', ()=>{
       const cur = document.documentElement.getAttribute('data-theme');
       document.documentElement.setAttribute('data-theme', cur==='dark' ? 'light' : 'dark');
@@ -488,21 +511,6 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     records.forEach(r=>counts[r.status]++);
     tilesWrap.innerHTML='';
 
-    // Primeira caixa: personalizar o nº de dias de antecedência do alerta
-    // (substitui o antigo separador "Atrasados").
-    const customDiv = document.createElement('div');
-    customDiv.className = 'tile';
-    customDiv.innerHTML = `<div class="label"><span class="dot critical"></span>Personalizar dias</div>
-      <input type="number" min="1" step="1" id="alertDaysInput" value="${ALERT_WINDOW_DAYS}">
-      <div class="subtitle" style="font-size:11px;margin-top:2px;">dias antes do fim da fidelização</div>`;
-    tilesWrap.appendChild(customDiv);
-    const input = customDiv.querySelector('#alertDaysInput');
-    input.addEventListener('click', e=>e.stopPropagation());
-    input.addEventListener('change', ()=>{
-      const v = parseInt(input.value, 10);
-      if(v > 0){ ALERT_WINDOW_DAYS = v; recomputeStatuses(); }
-    });
-
     tilesDef.forEach(t=>{
       const div = document.createElement('div');
       div.className = 'tile'+(activeStatus===t.key?' active':'');
@@ -519,12 +527,15 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     const st = document.getElementById('statusFilter').value;
     const tar = tarifSelEl.value;
     const sub = stripAccents(document.getElementById('subFilter').value.trim().toLowerCase());
+    const estadoFilter = document.getElementById('estadoContatoFilter').value;
     activeStatus = st;
     filtered = records.filter(r=>{
       if(q && !r.searchBlob.includes(q)) return false;
       if(st && r.status!==st) return false;
       if(tar && r.tarifNorm!==tar) return false;
       if(sub && !stripAccents((r.subagente||'').toLowerCase()).includes(sub)) return false;
+      if(estadoFilter==='__vazio__' && r.estadoContato) return false;
+      if(estadoFilter && estadoFilter!=='__vazio__' && r.estadoContato!==estadoFilter) return false;
       return true;
     });
     sortRecords();
@@ -560,11 +571,13 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     {key:'localidade', label:'Localidade'},
     {key:'fimDate', label:'Fim fidelização / estado'},
     {key:'proxDate', label:'Próx. refidelização'},
+    {key:'estadoContato', label:'Estado do contacto'},
     {key:'obs', label:'Observações (col. Q)', nosort:true},
     {key:'actions', label:'', nosort:true},
   ];
 
   let editingRowNum = null;
+  let confirmingDeleteRowNum = null;
 
   function toDateInputValue(dateObj, raw){
     if(dateObj){
@@ -575,11 +588,18 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     return '';
   }
 
-  function rowHtml(r, editing){
+  function rowHtml(r, mode){
+    // mode: 'view' | 'edit' | 'delete'
     const badgeClass = r.status==='atrasado'?'critical':r.status==='alerta'?'warning':r.status==='futuro'?'good':'muted';
-    const rowClass = 'row-'+badgeClass + (editing?' editing':'');
-    if(!editing){
+    const rowClass = 'row-'+badgeClass + (mode==='edit'?' editing':'') + (mode==='delete'?' deleting':'');
+    if(mode!=='edit'){
       const contactBits = [r.contato, r.telemovel, r.email].filter(Boolean);
+      const actionsHtml = mode==='delete'
+        ? `<div class="delete-confirm">Apagar este cliente da folha? Não pode ser desfeito.</div>
+           <button class="delete-confirm-btn" type="button">Sim, apagar</button>
+           <button class="delete-cancel-btn" type="button">Cancelar</button>`
+        : `<button class="edit-row-btn" type="button">Editar</button>
+           <button class="delete-row-btn" type="button">Apagar</button>`;
       return `<tr class="${rowClass}" data-row="${r.rowNum}">
         <td class="cliente">${esc(r.cliente)}</td>
         <td>${esc(r.nif||'—')}</td>
@@ -591,12 +611,18 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
           <span class="days">${r.fimDate? fmtDate(r.fimDate) : ''}</span>
         </td>
         <td class="dates">${r.proxDate? fmtDate(r.proxDate) : esc(r.proxRaw||'—')}</td>
+        <td class="estado">${r.estadoContato
+          ? `<span class="estado-pill">${esc(r.estadoContato)}</span><span class="estado-date">${r.estadoData? fmtDate(parseISO(r.estadoData)) : ''}</span>`
+          : '—'}</td>
         <td class="obs"><div class="obs-text">${esc(r.observacoes||'—')}</div></td>
-        <td class="actions"><button class="edit-row-btn" type="button">Editar</button></td>
+        <td class="actions">${actionsHtml}</td>
       </tr>`;
     }
     const fimVal = toDateInputValue(r.fimDate, r.fimRaw);
     const proxVal = toDateInputValue(r.proxDate, r.proxRaw);
+    const estadoOptionsHtml = ['<option value="">Sem estado</option>']
+      .concat(ESTADO_OPTIONS.map(opt=>`<option value="${esc(opt)}"${r.estadoContato===opt?' selected':''}>${esc(opt)}</option>`))
+      .join('');
     return `<tr class="${rowClass}" data-row="${r.rowNum}">
       <td><input type="text" class="f-cliente" value="${esc(r.cliente)}"></td>
       <td><input type="text" class="f-nif" value="${esc(r.nif)}"></td>
@@ -609,6 +635,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
       <td><input type="text" class="f-localidade" value="${esc(r.localidade)}"></td>
       <td><input type="date" class="f-fim" value="${fimVal}"></td>
       <td><input type="date" class="f-prox" value="${proxVal}"></td>
+      <td><select class="f-estado">${estadoOptionsHtml}</select></td>
       <td><textarea class="f-obs">${esc(r.observacoes==='—'?'':r.observacoes)}</textarea></td>
       <td class="actions">
         <button class="save-row-btn" type="button">Guardar</button>
@@ -632,7 +659,10 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
         return `<th ${c.nosort?'':'data-key="'+c.key+'"'} class="${sorted?'sorted':''}">${c.label}${sorted? (sortDir===1?' ▲':' ▼'):''}</th>`;
       }).join('') + '</tr></thead>';
 
-      let tbody = '<tbody>' + pageRows.map(r=> rowHtml(r, r.rowNum===editingRowNum)).join('') + '</tbody>';
+      let tbody = '<tbody>' + pageRows.map(r=>{
+        const mode = r.rowNum===editingRowNum ? 'edit' : (r.rowNum===confirmingDeleteRowNum ? 'delete' : 'view');
+        return rowHtml(r, mode);
+      }).join('') + '</tbody>';
 
       tableWrap.innerHTML = `<table>${thead}${tbody}</table>`;
 
@@ -648,6 +678,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
       tableWrap.querySelectorAll('.edit-row-btn').forEach(btn=>{
         btn.addEventListener('click', ()=>{
           editingRowNum = +btn.closest('tr').getAttribute('data-row');
+          confirmingDeleteRowNum = null;
           render();
         });
       });
@@ -659,6 +690,23 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
           const tr = btn.closest('tr');
           const rowNum = +tr.getAttribute('data-row');
           saveRow(rowNum, tr, btn);
+        });
+      });
+      tableWrap.querySelectorAll('.delete-row-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          confirmingDeleteRowNum = +btn.closest('tr').getAttribute('data-row');
+          editingRowNum = null;
+          render();
+        });
+      });
+      tableWrap.querySelectorAll('.delete-cancel-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ confirmingDeleteRowNum = null; render(); });
+      });
+      tableWrap.querySelectorAll('.delete-confirm-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const tr = btn.closest('tr');
+          const rowNum = +tr.getAttribute('data-row');
+          deleteRow(rowNum, tr, btn);
         });
       });
     }
@@ -680,6 +728,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     const localidade = val('.f-localidade').trim();
     const fim = val('.f-fim');
     const prox = val('.f-prox');
+    const estadoContato = val('.f-estado');
     const observacoes = tr.querySelector('.f-obs').value;
 
     btn.disabled = true;
@@ -688,9 +737,15 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     if(cancelBtn) cancelBtn.disabled = true;
     setSyncState('saving');
 
+    const rec = records.find(r=>r.rowNum===rowNum);
+    // Só grava uma nova data quando o "Estado do contacto" realmente muda —
+    // assim a data reflete o dia em que a opção foi escolhida, não o dia da gravação.
+    const estadoChanged = rec && rec.estadoContato !== estadoContato;
+    const estadoData = estadoChanged ? (estadoContato ? todayISO() : '') : (rec? rec.estadoData : '');
+
     const updates = {
       G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
-      D: fim, C: prox, Q: observacoes
+      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes
     };
 
     fetch(API_URL, {
@@ -699,17 +754,17 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
       body: JSON.stringify({ token: TOKEN, row: rowNum, updates })
     }).then(r=>r.json()).then(res=>{
       if(!res.ok){ throw new Error(res.error||'erro'); }
-      const rec = records.find(r=>r.rowNum===rowNum);
       if(rec){
         rec.cliente = cliente; rec.nif = nif; rec.tarifario = tarifario; rec.tarifNorm = tarifario.toUpperCase();
         rec.contato = contato; rec.telemovel = telemovel; rec.email = email; rec.localidade = localidade;
         rec.observacoes = observacoes;
+        rec.estadoContato = estadoContato; rec.estadoData = estadoData;
         rec.fimRaw = fim || null; rec.fimDate = parseISO(fim);
         rec.proxRaw = prox || null; rec.proxDate = parseISO(prox);
         const days = rec.fimDate ? Math.round((rec.fimDate - today)/86400000) : Infinity;
         const s = statusFromDays(days, rec.fimRaw);
         rec.days = days; rec.status = s.status; rec.statusLabel = s.statusLabel;
-        rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes).toLowerCase());
+        rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
       }
       editingRowNum = null;
       setSyncState('ok');
@@ -730,21 +785,64 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     });
   }
 
-  function exportCsv(){
-    const headers = ['Cliente','NIF','Tarifário','Subagente','Contacto','Telemóvel','E-mail','Localidade','Fim de fidelização','Estado','Próxima refidelização','Observações'];
-    const lines = [headers.join(';')];
-    filtered.forEach(r=>{
-      const row = [r.cliente,r.nif,r.tarifario,r.subagente,r.contato,r.telemovel,r.email,r.localidade,
-        r.fimDate? fmtDate(r.fimDate): (r.fimRaw||''), r.statusLabel,
-        r.proxDate? fmtDate(r.proxDate): (r.proxRaw||''), r.observacoes];
-      lines.push(row.map(v=>`"${String(v==null?'':v).replace(/"/g,'""')}"`).join(';'));
+  function deleteRow(rowNum, tr, btn){
+    btn.disabled = true;
+    btn.textContent = 'A apagar…';
+    const cancelBtn = tr.querySelector('.delete-cancel-btn');
+    if(cancelBtn) cancelBtn.disabled = true;
+    setSyncState('saving');
+
+    fetch(API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ token: TOKEN, row: rowNum, action: 'delete' })
+    }).then(r=>r.json()).then(res=>{
+      if(!res.ok){ throw new Error(res.error||'erro'); }
+      // A linha foi removida na folha, o que faz subir uma posição a todas as
+      // linhas seguintes — atualizamos os rowNum em memória para se manterem
+      // corretos sem precisar de recarregar tudo.
+      records = records.filter(r=>r.rowNum!==rowNum);
+      records.forEach(r=>{ if(r.rowNum > rowNum) r.rowNum -= 1; });
+      confirmingDeleteRowNum = null;
+      setSyncState('ok');
+      populateFilterOptions();
+      applyFilters();
+    }).catch(err=>{
+      setSyncState('error');
+      btn.disabled = false;
+      btn.textContent = 'Sim, apagar';
+      if(cancelBtn) cancelBtn.disabled = false;
+      let flag = tr.querySelector('.save-flag');
+      if(!flag){
+        flag = document.createElement('span');
+        flag.className = 'save-flag error';
+        tr.querySelector('.actions').appendChild(flag);
+      }
+      flag.textContent = 'Falha ao apagar: ' + err.message;
     });
-    const blob = new Blob(['﻿'+lines.join('\r\n')], {type:'text/csv;charset=utf-8;'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = 'fidelizacoes_filtrado.csv';
-    document.body.appendChild(a); a.click(); document.body.removeChild(a);
-    URL.revokeObjectURL(url);
+  }
+
+  function exportXls(){
+    const headers = ['Cliente','NIF','Tarifário','Subagente','Contacto','Telemóvel','E-mail','Localidade','Fim de fidelização','Estado da fidelização','Próxima refidelização','Estado do contacto','Data do estado','Observações'];
+    const aoa = [headers];
+    filtered.forEach(r=>{
+      aoa.push([r.cliente,r.nif,r.tarifario,r.subagente,r.contato,r.telemovel,r.email,r.localidade,
+        r.fimDate? fmtDate(r.fimDate): (r.fimRaw||''), r.statusLabel,
+        r.proxDate? fmtDate(r.proxDate): (r.proxRaw||''),
+        r.estadoContato||'', r.estadoData? fmtDate(parseISO(r.estadoData)): '',
+        r.observacoes]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = headers.map((h,i)=>{
+      let max = h.length;
+      aoa.forEach(row=>{ const v = row[i]; if(v!=null){ max = Math.max(max, String(v).length); } });
+      return { wch: Math.min(Math.max(max+2, 10), 45) };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Fidelizações');
+    const stamp = new Date();
+    const y = stamp.getFullYear(), m = String(stamp.getMonth()+1).padStart(2,'0'), d = String(stamp.getDate()).padStart(2,'0');
+    XLSX.writeFile(wb, `fidelizacoes_filtrado_${y}${m}${d}.xlsx`);
   }
 })();
 </script>
