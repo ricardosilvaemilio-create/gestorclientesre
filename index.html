@@ -1,995 +1,162 @@
-<!DOCTYPE html>
-<html lang="pt-PT">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Gestão de Fidelizações — Clientes</title>
-<style>
-:root{
-  color-scheme: light;
-  --surface-1:#fcfcfb; --page:#f9f9f7; --card:#ffffff;
-  --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#898781;
-  --grid:#e1e0d9; --border:rgba(11,11,11,0.10); --baseline:#c3c2b7;
-  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
-  --good-bg:#e7f7e7; --warning-bg:#fff4de; --serious-bg:#fdece4; --critical-bg:#fbe4e4;
-  --muted-bg:#eeede9; --blue:#2a78d6; --blue-bg:#e8f0fc;
-}
-@media (prefers-color-scheme: dark){
-  :root:where(:not([data-theme="light"])){
-    color-scheme: dark;
-    --surface-1:#1a1a19; --page:#0d0d0d; --card:#221f1e;
-    --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#898781;
-    --grid:#2c2c2a; --border:rgba(255,255,255,0.10); --baseline:#383835;
-    --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#e66767;
-    --good-bg:#123312; --warning-bg:#3a2c0c; --serious-bg:#3a2018; --critical-bg:#3a1717;
-    --muted-bg:#2a2a28; --blue:#3987e5; --blue-bg:#152840;
+// ===================================================================
+// Script de ligação entre a Google Sheet "Base de dados de clientes"
+// e o painel de Gestão de Fidelizações.
+//
+// COMO USAR:
+// 1. Abre a tua Google Sheet (a que tem o separador "Geral" com os
+//    dados dos clientes).
+// 2. Menu: Extensões > Apps Script.
+// 3. Apaga o conteúdo que lá estiver e cola este ficheiro inteiro.
+// 4. Clica em "Implementar" (Deploy) > "Nova implementação".
+//    - Tipo: "Aplicação Web" (Web app)
+//    - Executar como: Eu (a tua conta)
+//    - Quem tem acesso: Qualquer pessoa (Anyone)
+// 5. Autoriza as permissões pedidas (é o teu próprio script, é seguro).
+// 6. Copia o URL gerado (termina em /exec) e envia-mo no chat.
+//
+// Mantém o TOKEN abaixo privado — é a única coisa que impede que
+// outra pessoa com o URL leia ou escreva na tua folha (protege
+// leituras e escritas).
+// ===================================================================
+
+var SHEET_NAME = 'Geral';
+var TOKEN = 'vOJtAuuqkgE6_9Xo0hsOjjRm73-36jMi'; // não partilhes isto
+var HEADER_ROW = 1;
+var FIRST_DATA_ROW = 2;
+var LAST_COL = 19; // colunas A (Data Ativação) até S (Data do estado)
+// R = Estado do contacto, S = Data do estado — precisas de acrescentar estas
+// duas colunas (com cabeçalho) à folha antes de publicares esta versão.
+
+var PAGE_SIZE = 2000; // linhas por pedido — evita uma única execução gigante e lenta
+
+function doGet(e) {
+  var token = e && e.parameter ? e.parameter.token : null;
+  if (token !== TOKEN) {
+    return jsonOut({ ok: false, error: 'token inválido' });
   }
-}
-:root[data-theme="dark"]{
-  color-scheme: dark;
-  --surface-1:#1a1a19; --page:#0d0d0d; --card:#221f1e;
-  --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#898781;
-  --grid:#2c2c2a; --border:rgba(255,255,255,0.10); --baseline:#383835;
-  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#e66767;
-  --good-bg:#123312; --warning-bg:#3a2c0c; --serious-bg:#3a2018; --critical-bg:#3a1717;
-  --muted-bg:#2a2a28; --blue:#3987e5; --blue-bg:#152840;
-}
-*{box-sizing:border-box;}
-body{
-  margin:0; background:var(--page); color:var(--text-primary);
-  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
-  font-size:14px;
-}
-.wrap{max-width:1400px; margin:0 auto; padding:24px 20px 60px;}
-header.top{display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:20px; flex-wrap:wrap;}
-h1{font-size:20px; margin:0 0 4px;}
-.subtitle{color:var(--text-secondary); font-size:13px;}
-.theme-toggle{
-  border:1px solid var(--border); background:var(--card); color:var(--text-secondary);
-  border-radius:8px; padding:6px 12px; font-size:13px; cursor:pointer;
-}
-.tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:20px;}
-.tile{
-  background:var(--card); border:1px solid var(--border); border-radius:12px;
-  padding:14px 16px; cursor:pointer; transition:box-shadow .15s;
-}
-.tile:hover{box-shadow:0 2px 8px var(--border);}
-.tile.active{outline:2px solid var(--blue);}
-.tile .label{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); font-weight:600; text-transform:uppercase; letter-spacing:.02em;}
-.tile .value{font-size:28px; font-weight:700; margin-top:6px; font-variant-numeric:tabular-nums;}
-.dot{width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0;}
-.dot.critical{background:var(--critical);} .dot.warning{background:var(--warning);}
-.dot.good{background:var(--blue);} .dot.muted{background:var(--text-muted);}
+  var sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
+  var lastRow = sheet.getLastRow();
+  var totalDataRows = Math.max(0, lastRow - FIRST_DATA_ROW + 1);
 
-.filters{
-  background:var(--card); border:1px solid var(--border); border-radius:12px;
-  padding:14px 16px; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;
-}
-.field{display:flex; flex-direction:column; gap:4px;}
-.field label{font-size:11px; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:.02em;}
-.field input, .field select{
-  border:1px solid var(--baseline); border-radius:8px; padding:7px 10px; font-size:13px;
-  background:var(--surface-1); color:var(--text-primary); min-width:160px;
-}
-.field input:focus, .field select:focus{outline:2px solid var(--blue); outline-offset:1px;}
-#search{min-width:260px;}
-.estado-chips{display:flex; gap:6px; flex-wrap:wrap; align-items:center; height:34px;}
-.estado-chip{
-  font-size:12px; padding:0 10px; height:34px; border-radius:8px; border:1px solid var(--baseline);
-  background:var(--surface-1); color:var(--text-primary); cursor:pointer; white-space:nowrap;
-  display:inline-flex; align-items:center; gap:5px;
-}
-.estado-chip:hover{background:var(--muted-bg);}
-.estado-chip.active{background:var(--blue); border-color:var(--blue); color:#fff;}
-.estado-chip .n{font-variant-numeric:tabular-nums; opacity:.75; font-size:11px;}
-.btn{
-  border:1px solid var(--baseline); background:var(--surface-1); color:var(--text-primary);
-  border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer; height:34px;
-}
-.btn:hover{background:var(--muted-bg);}
-.btn.primary{background:var(--blue); border-color:var(--blue); color:#fff;}
-.btn:disabled{opacity:.5; cursor:not-allowed;}
+  var offset = parseInt((e.parameter && e.parameter.offset) || '0', 10) || 0;
+  var limit = parseInt((e.parameter && e.parameter.limit) || String(PAGE_SIZE), 10) || PAGE_SIZE;
 
-.summary-line{color:var(--text-secondary); font-size:13px; margin:0 0 10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
-.sync-dot{width:8px; height:8px; border-radius:50%; background:var(--good); display:inline-block;}
-.sync-dot.saving{background:var(--warning);}
-.sync-dot.error{background:var(--critical);}
-
-table{width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; border:1px solid var(--border);}
-thead th{
-  text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.02em; color:var(--text-muted);
-  padding:10px 12px; border-bottom:1px solid var(--grid); cursor:pointer; white-space:nowrap; user-select:none;
-  position:sticky; top:0; background:var(--card); z-index:1;
-}
-thead th:hover{color:var(--text-primary);}
-thead th.sorted{color:var(--blue);}
-tbody tr{border-bottom:1px solid var(--grid);}
-tbody tr:last-child{border-bottom:none;}
-tbody tr:hover{background:var(--muted-bg);}
-td{padding:10px 12px; vertical-align:top; font-size:13px;}
-td.cliente{font-weight:600; max-width:220px;}
-td.contact{font-size:12px; color:var(--text-secondary); max-width:170px;}
-td.contact div{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
-td.obs{max-width:280px; color:var(--text-secondary); font-size:12.5px;}
-td.dates{white-space:nowrap; font-variant-numeric:tabular-nums; font-size:12.5px;}
-td.dates .days{display:block; font-size:11px; margin-top:2px;}
-td.estado{white-space:nowrap; font-size:12.5px;}
-
-.obs-text{white-space:pre-wrap; min-height:18px; border-radius:6px; padding:3px 5px; margin:-3px -5px;}
-.estado-pill{
-  display:inline-block; padding:2px 9px; border-radius:100px; background:var(--blue-bg); color:var(--blue);
-  font-size:11.5px; font-weight:600; white-space:nowrap;
-}
-.estado-date{display:block; font-size:11px; color:var(--text-muted); margin-top:3px;}
-
-tr.editing, tr.new-record{background:var(--blue-bg);}
-td input[type=text], td input[type=date], td select{
-  width:100%; padding:5px 7px; border:1px solid var(--baseline); border-radius:6px;
-  font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary);
-}
-td textarea{
-  width:100%; min-height:60px; border:1px solid var(--blue); border-radius:6px; padding:6px;
-  font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary); resize:vertical;
-}
-.contact-edit{display:flex; flex-direction:column; gap:4px;}
-td.actions{white-space:nowrap; min-width:110px;}
-.edit-row-btn, .save-row-btn, .cancel-row-btn, .delete-row-btn, .delete-confirm-btn, .delete-cancel-btn{
-  font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--baseline);
-  background:var(--surface-1); cursor:pointer; display:block; width:100%; margin-bottom:4px;
-}
-.save-row-btn{background:var(--blue); color:#fff; border-color:var(--blue);}
-.delete-row-btn, .delete-confirm-btn{color:var(--critical); border-color:var(--critical);}
-.delete-confirm-btn{background:var(--critical); color:#fff;}
-.delete-confirm{font-size:11px; color:var(--critical); margin-bottom:6px; line-height:1.4;}
-tr.deleting{background:var(--critical-bg);}
-.save-flag{font-size:10.5px; color:var(--good); margin-left:6px; display:block; margin-top:4px;}
-.save-flag.error{color:var(--critical);}
-
-.badge{
-  display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:100px;
-  font-size:11.5px; font-weight:600; white-space:nowrap;
-}
-.badge .ico{width:7px; height:7px; border-radius:50%; flex-shrink:0;}
-.badge.critical{background:var(--critical-bg); color:var(--critical);}
-.badge.warning{background:var(--warning-bg); color:#8a5a00;}
-.badge.good{background:var(--blue-bg); color:var(--blue);}
-.badge.muted{background:var(--muted-bg); color:var(--text-secondary);}
-tr.row-critical td.dates{border-left:3px solid var(--critical); padding-left:9px;}
-tr.row-warning td.dates{border-left:3px solid var(--warning); padding-left:9px;}
-tr.row-good td.dates{border-left:3px solid var(--blue); padding-left:9px;}
-tr.row-muted td.dates{border-left:3px solid var(--baseline); padding-left:9px;}
-
-.pager{display:flex; justify-content:space-between; align-items:center; margin-top:14px; gap:10px; flex-wrap:wrap;}
-.pager .info{color:var(--text-secondary); font-size:12.5px;}
-.pager .controls{display:flex; gap:6px; align-items:center;}
-.empty{padding:40px; text-align:center; color:var(--text-muted);}
-footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:center;}
-
-/* Login / connect gate */
-.gate{
-  max-width:460px; margin:80px auto; background:var(--card); border:1px solid var(--border);
-  border-radius:14px; padding:28px 28px 24px;
-}
-.gate h2{margin:0 0 6px; font-size:18px;}
-.gate p{color:var(--text-secondary); font-size:13px; line-height:1.5; margin:0 0 18px;}
-.gate .field{margin-bottom:12px;}
-.gate .field input{width:100%; min-width:0;}
-.gate .error{color:var(--critical); font-size:12.5px; margin-top:10px; display:none;}
-.gate .error.show{display:block;}
-.gate button{width:100%; margin-top:6px;}
-.hidden{display:none !important;}
-</style>
-</head>
-<body>
-<div class="wrap">
-
-  <div id="gate" class="gate">
-    <h2>Gestão de Fidelizações</h2>
-    <p>Este painel não guarda dados de clientes no código — liga-se em direto à tua Google Sheet através do Apps Script. Introduz o URL e o token que configuraste (ver o ficheiro Code.gs).</p>
-    <div class="field">
-      <label for="apiUrl">URL da aplicação Web (Apps Script)</label>
-      <input id="apiUrl" type="text" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
-    </div>
-    <div class="field">
-      <label for="apiToken">Token de acesso</label>
-      <input id="apiToken" type="password" placeholder="o teu token" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
-    </div>
-    <button class="btn primary" id="connectBtn">Ligar</button>
-    <div class="error" id="gateError"></div>
-    <p style="margin-top:14px;font-size:11.5px;">Dica: guarda um marcador (bookmark) com <code>?api=URL&token=TOKEN</code> no fim do link desta página para entrares automaticamente da próxima vez, em qualquer computador.</p>
-  </div>
-
-  <div id="app" class="hidden">
-    <header class="top">
-      <div>
-        <h1>Gestão de Fidelizações</h1>
-      </div>
-      <div style="display:flex; gap:8px;">
-        <button class="btn primary" id="newRecordBtn">+ Novo cliente</button>
-        <button class="btn" id="refreshBtn">↻ Atualizar</button>
-        <button class="theme-toggle" id="themeToggle">🌓 Tema</button>
-      </div>
-    </header>
-
-    <div class="tiles" id="tiles"></div>
-
-    <div class="filters">
-      <div class="field" style="flex:1;">
-        <label for="search">Pesquisar</label>
-        <input id="search" type="text" placeholder="Cliente, NIF, contacto, e-mail, subagente, observações…">
-      </div>
-      <div class="field">
-        <label for="statusFilter">Estado da fidelização</label>
-        <select id="statusFilter">
-          <option value="">Todos</option>
-          <option value="atrasado">Atrasado</option>
-          <option value="alerta">Em alerta</option>
-          <option value="futuro">Futuro</option>
-          <option value="outro">Sem fidelização / outro</option>
-        </select>
-      </div>
-      <div class="field">
-        <label for="tarifFilter">Tarifário</label>
-        <select id="tarifFilter"><option value="">Todos</option></select>
-      </div>
-      <div class="field">
-        <label for="subFilter">Subagente</label>
-        <input id="subFilter" type="text" list="subList" placeholder="Todos">
-        <datalist id="subList"></datalist>
-      </div>
-      <div class="field">
-        <label>Estado do contacto</label>
-        <div class="estado-chips" id="estadoContatoChips"></div>
-      </div>
-      <button class="btn" id="clearFilters">Limpar filtros</button>
-      <button class="btn primary" id="exportCsv">Exportar ficheiro XLS (filtrado)</button>
-    </div>
-
-    <p class="summary-line"><span class="sync-dot" id="syncDot"></span><span id="summaryLine"></span></p>
-
-    <div id="tableWrap"></div>
-
-    <div class="pager">
-      <div class="info" id="pageInfo"></div>
-      <div class="controls">
-        <button class="btn" id="prevPage">‹ Anterior</button>
-        <button class="btn" id="nextPage">Seguinte ›</button>
-      </div>
-    </div>
-
-    <footer>Painel ligado em direto à Google Sheet. As observações que editares aqui gravam-se diretamente na folha. Os estados são recalculados a cada abertura, com base na data de hoje.</footer>
-  </div>
-</div>
-
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script>
-(function(){
-  const ALERT_WINDOW_DAYS = 180; // dias de antecedência antes do fim da fidelização
-  let API_URL = '';
-  let TOKEN = '';
-  let records = [];
-  let filtered = [];
-  let sortKey = 'days';
-  let sortDir = 1;
-  let page = 1;
-  const pageSize = 50;
-
-  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data'];
-  // row array from Apps Script: [rowNum, A..S] -> index i+1 = COLS[i]
-  // estado_contato = coluna R, estado_data = coluna S (têm de existir na folha — ver Code.gs).
-
-  // Hipóteses do "Estado do contacto" — para adicionar mais opções, acrescenta aqui.
-  const ESTADO_OPTIONS = ['Em negociação', 'Aguardo documentação', 'Concluído'];
-
-  function stripAccents(s){ return s.normalize('NFD').replace(/[̀-ͯ]/g,''); }
-  function parseISO(s){
-    if(!s) return null;
-    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
-    if(!m) return null;
-    return new Date(+m[1], +m[2]-1, +m[3]);
-  }
-  function fmtDate(d){
-    if(!d) return '—';
-    const dd = String(d.getDate()).padStart(2,'0');
-    const mm = String(d.getMonth()+1).padStart(2,'0');
-    return `${dd}/${mm}/${d.getFullYear()}`;
-  }
-  function todayISO(){
-    const d = new Date();
-    const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
-    return `${y}-${m}-${dd}`;
-  }
-  function esc(s){
-    return String(s==null? '': s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+  if (totalDataRows <= 0) {
+    return jsonOut({ headers: headerRow_(sheet), rows: [], total: 0, offset: 0, hasMore: false });
   }
 
-  const today = new Date(); today.setHours(0,0,0,0);
-
-  function statusFromDays(days, fimRaw){
-    if(!Number.isFinite(days)){
-      return { status:'outro', statusLabel: fimRaw ? String(fimRaw).charAt(0).toUpperCase()+String(fimRaw).slice(1) : 'Sem informação' };
-    }
-    if(days < 0) return { status:'atrasado', statusLabel:`Atrasado há ${Math.abs(days)} dia(s)` };
-    if(days <= ALERT_WINDOW_DAYS) return { status:'alerta', statusLabel:`Faltam ${days} dia(s)` };
-    return { status:'futuro', statusLabel:`Faltam ${days} dia(s)` };
+  var startRow = FIRST_DATA_ROW + offset;
+  var numRows = Math.min(limit, lastRow - startRow + 1);
+  if (numRows <= 0) {
+    return jsonOut({ headers: headerRow_(sheet), rows: [], total: totalDataRows, offset: offset, hasMore: false });
   }
 
-  function buildRecord(rowArr){
-    const rowNum = rowArr[0];
-    const get = (name)=> rowArr[COLS.indexOf(name)+1];
-    const fimRaw = get('fim_fidelizacao');
-    const proxRaw = get('proxima_refid');
-    const fimDate = parseISO(fimRaw);
-    const proxDate = parseISO(proxRaw);
-    const days = fimDate ? Math.round((fimDate - today)/86400000) : Infinity;
-    const s = statusFromDays(days, fimRaw);
-    const tarifario = get('tarifario') || '';
-    const rec = {
-      rowNum,
-      cliente: get('cliente')||'', nif: get('nif')||'', subagente: get('subagente')||'',
-      tarifario, tarifNorm: tarifario.trim().toUpperCase(),
-      localidade: get('localidade')||'', contato: get('contato')||'', email: get('email')||'',
-      telemovel: get('telemovel')||'', observacoes: get('observacoes')||'',
-      estadoContato: get('estado_contato')||'', estadoData: get('estado_data')||'',
-      fimDate, fimRaw, proxDate, proxRaw,
-      status: s.status, statusLabel: s.statusLabel, days
-    };
-    rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
-    return rec;
+  var values = sheet.getRange(startRow, 1, numRows, LAST_COL).getValues();
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    if (row.join('') === '') continue; // ignora linhas totalmente vazias
+    var formatted = row.map(formatCell);
+    out.push([startRow + i].concat(formatted));
   }
 
-  // ---------- Gate / connection ----------
-  const gate = document.getElementById('gate');
-  const app = document.getElementById('app');
-  const gateError = document.getElementById('gateError');
-
-  function paramsFromLocation(){
-    const p = new URLSearchParams(location.search);
-    return { api: p.get('api')||'', token: p.get('token')||'' };
-  }
-  const initial = paramsFromLocation();
-  // Só pré-preenchemos os campos visíveis quando NÃO vamos ligar automaticamente —
-  // se ligarmos automaticamente a partir do URL, usamos os valores da query string
-  // diretamente (sem passar pelos <input>), para o autofill do navegador nunca
-  // ter oportunidade de sobrepor o token com um valor guardado antigo.
-  if(initial.api && initial.token){
-    connect(initial.api, initial.token);
-  } else {
-    if(initial.api) document.getElementById('apiUrl').value = initial.api;
-    if(initial.token) document.getElementById('apiToken').value = initial.token;
-  }
-
-  document.getElementById('connectBtn').addEventListener('click', ()=>{
-    connect(document.getElementById('apiUrl').value.trim(), document.getElementById('apiToken').value.trim());
+  var hasMore = (startRow + numRows - 1) < lastRow;
+  return jsonOut({
+    headers: headerRow_(sheet),
+    rows: out,
+    total: totalDataRows,
+    offset: offset,
+    nextOffset: offset + numRows,
+    hasMore: hasMore,
+    generatedAt: new Date().toISOString()
   });
+}
 
-  function connect(apiUrl, token){
-    API_URL = (apiUrl||'').trim();
-    TOKEN = (token||'').trim();
-    gateError.classList.remove('show');
-    if(!API_URL || !TOKEN){
-      gateError.textContent = 'Preenche o URL e o token.';
-      gateError.classList.add('show');
-      return;
+function headerRow_(sheet) {
+  return sheet.getRange(HEADER_ROW, 1, 1, LAST_COL).getValues()[0];
+}
+
+function doPost(e) {
+  try {
+    var body = JSON.parse(e.postData.contents);
+    if (body.token !== TOKEN) {
+      return jsonOut({ ok: false, error: 'token inválido' });
     }
-    document.getElementById('connectBtn').disabled = true;
-    document.getElementById('connectBtn').textContent = 'A ligar…';
-    loadData(true);
-  }
+    var sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
+    var colLetters = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S'];
 
-  function loadData(firstLoad){
-    setSyncState('saving');
-    const allRows = [];
-
-    function fetchPage(offset){
-      const url = API_URL + '?token=' + encodeURIComponent(TOKEN) + '&offset=' + offset;
-      return fetch(url, {method:'GET'})
-        .then(r=>r.json())
-        .then(data=>{
-          if(data.ok === false){
-            throw new Error(data.error || 'erro desconhecido');
-          }
-          allRows.push.apply(allRows, data.rows||[]);
-          const progressText = 'A carregar… ' + allRows.length.toLocaleString('pt-PT') + (data.total? (' / '+data.total.toLocaleString('pt-PT')) : '');
-          if(firstLoad){
-            document.getElementById('connectBtn').textContent = progressText;
-          } else {
-            const sl = document.getElementById('summaryLine');
-            if(sl) sl.textContent = progressText;
-          }
-          if(data.hasMore){
-            return fetchPage(data.nextOffset);
-          }
-        });
-    }
-
-    fetchPage(0)
-      .then(()=>{
-        records = allRows.map(buildRecord);
-        setSyncState('ok');
-        if(firstLoad){
-          gate.classList.add('hidden');
-          app.classList.remove('hidden');
-          initApp();
-        } else {
-          populateFilterOptions();
-          applyFilters();
+    if (body.action === 'create') {
+      var newRow = sheet.getLastRow() + 1;
+      var values = body.values || {};
+      for (var vKey in values) {
+        var vIdx = colLetters.indexOf(vKey.toUpperCase());
+        if (vIdx > -1 && values[vKey] !== '' && values[vKey] != null) {
+          sheet.getRange(newRow, vIdx + 1).setValue(values[vKey]);
         }
-      })
-      .catch(err=>{
-        setSyncState('error');
-        if(firstLoad){
-          gateError.textContent = 'Não foi possível ligar: ' + err.message + '. Confirma o URL, o token, e se a implementação está com acesso "Qualquer pessoa".';
-          gateError.classList.add('show');
-          document.getElementById('connectBtn').disabled = false;
-          document.getElementById('connectBtn').textContent = 'Ligar';
-        }
-      });
-  }
-
-  function setSyncState(state){
-    const dot = document.getElementById('syncDot');
-    if(!dot) return;
-    dot.className = 'sync-dot' + (state==='saving'?' saving':state==='error'?' error':'');
-  }
-
-  document.getElementById('refreshBtn').addEventListener('click', ()=>loadData(false));
-
-  // ---------- App ----------
-  let tarifSelEl, subListEl, tilesWrap, estadoChipsWrap, activeStatus = '', activeEstadoFilter = '';
-  const tilesDef = [
-    {key:'atrasado', label:'Atrasado', dot:'critical', desc:'já passou a data'},
-    {key:'alerta', label:'Em alerta', dot:'warning', desc:`dentro de ${ALERT_WINDOW_DAYS} dias`},
-    {key:'futuro', label:'Futuro', dot:'good', desc:`além de ${ALERT_WINDOW_DAYS} dias`},
-    {key:'outro', label:'Sem fidelização / outro', dot:'muted', desc:'sem data associada'},
-  ];
-  const estadoChipsDef = [
-    {value:'', label:'Todos'},
-    ...ESTADO_OPTIONS.map(opt=>({value:opt, label:opt})),
-    {value:'__vazio__', label:'Sem estado'},
-  ];
-
-  function initApp(){
-    tarifSelEl = document.getElementById('tarifFilter');
-    subListEl = document.getElementById('subList');
-    tilesWrap = document.getElementById('tiles');
-    estadoChipsWrap = document.getElementById('estadoContatoChips');
-
-    populateFilterOptions();
-
-    document.getElementById('search').addEventListener('input', debounce(applyFilters,150));
-    document.getElementById('statusFilter').addEventListener('change', applyFilters);
-    tarifSelEl.addEventListener('change', applyFilters);
-    document.getElementById('subFilter').addEventListener('input', debounce(applyFilters,150));
-    document.getElementById('clearFilters').addEventListener('click', ()=>{
-      document.getElementById('search').value='';
-      document.getElementById('statusFilter').value='';
-      tarifSelEl.value='';
-      document.getElementById('subFilter').value='';
-      activeStatus='';
-      activeEstadoFilter='';
-      applyFilters();
-    });
-    document.getElementById('prevPage').addEventListener('click', ()=>{ if(page>1){page--; render();} });
-    document.getElementById('nextPage').addEventListener('click', ()=>{
-      const totalPages = Math.max(1, Math.ceil(filtered.length/pageSize));
-      if(page<totalPages){page++; render();}
-    });
-    document.getElementById('exportCsv').addEventListener('click', exportXls);
-    document.getElementById('newRecordBtn').addEventListener('click', ()=>{
-      creatingNew = true;
-      editingRowNum = null;
-      confirmingDeleteRowNum = null;
-      page = 1;
-      render();
-    });
-    document.getElementById('themeToggle').addEventListener('click', ()=>{
-      const cur = document.documentElement.getAttribute('data-theme');
-      document.documentElement.setAttribute('data-theme', cur==='dark' ? 'light' : 'dark');
-    });
-
-    filtered = records.slice();
-    renderTiles();
-    renderEstadoChips();
-    sortRecords();
-    render();
-  }
-
-  function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
-
-  function populateFilterOptions(){
-    const tarifGroups = {};
-    records.forEach(r=>{
-      if(!r.tarifNorm) return;
-      const g = tarifGroups[r.tarifNorm] || (tarifGroups[r.tarifNorm] = {});
-      g[r.tarifario] = (g[r.tarifario]||0) + 1;
-    });
-    const tarifs = Object.keys(tarifGroups).map(norm=>{
-      const variants = tarifGroups[norm];
-      const label = Object.keys(variants).sort((a,b)=>variants[b]-variants[a])[0];
-      return {norm, label};
-    }).sort((a,b)=>a.label.localeCompare(b.label,'pt'));
-    const prevTarif = tarifSelEl.value;
-    tarifSelEl.innerHTML = '<option value="">Todos</option>';
-    tarifs.forEach(t=>{ const o=document.createElement('option'); o.value=t.norm; o.textContent=t.label; tarifSelEl.appendChild(o); });
-    tarifSelEl.value = prevTarif;
-
-    const subs = [...new Set(records.map(r=>r.subagente).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt'));
-    subListEl.innerHTML = '';
-    subs.forEach(s=>{ const o=document.createElement('option'); o.value=s; subListEl.appendChild(o); });
-  }
-
-  function renderTiles(){
-    const counts = {atrasado:0, alerta:0, futuro:0, outro:0};
-    records.forEach(r=>counts[r.status]++);
-    tilesWrap.innerHTML='';
-
-    tilesDef.forEach(t=>{
-      const div = document.createElement('div');
-      div.className = 'tile'+(activeStatus===t.key?' active':'');
-      div.innerHTML = `<div class="label"><span class="dot ${t.dot}"></span>${t.label}</div>
-        <div class="value">${counts[t.key].toLocaleString('pt-PT')}</div>
-        <div class="subtitle" style="font-size:11px;margin-top:2px;">${t.desc}</div>`;
-      div.onclick = ()=>{ activeStatus = (activeStatus===t.key)? '' : t.key; document.getElementById('statusFilter').value=activeStatus; applyFilters(); };
-      tilesWrap.appendChild(div);
-    });
-  }
-
-  function renderEstadoChips(){
-    const counts = { '': records.length, '__vazio__': 0 };
-    ESTADO_OPTIONS.forEach(opt=>{ counts[opt] = 0; });
-    records.forEach(r=>{
-      if(r.estadoContato){ counts[r.estadoContato] = (counts[r.estadoContato]||0) + 1; }
-      else { counts['__vazio__']++; }
-    });
-    estadoChipsWrap.innerHTML = '';
-    estadoChipsDef.forEach(c=>{
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'estado-chip' + (activeEstadoFilter===c.value ? ' active' : '');
-      btn.innerHTML = `${esc(c.label)} <span class="n">${(counts[c.value]||0).toLocaleString('pt-PT')}</span>`;
-      btn.addEventListener('click', ()=>{
-        activeEstadoFilter = (activeEstadoFilter===c.value) ? '' : c.value;
-        applyFilters();
-      });
-      estadoChipsWrap.appendChild(btn);
-    });
-  }
-
-  function applyFilters(){
-    const q = stripAccents(document.getElementById('search').value.trim().toLowerCase());
-    const st = document.getElementById('statusFilter').value;
-    const tar = tarifSelEl.value;
-    const sub = stripAccents(document.getElementById('subFilter').value.trim().toLowerCase());
-    activeStatus = st;
-    filtered = records.filter(r=>{
-      if(q && !r.searchBlob.includes(q)) return false;
-      if(st && r.status!==st) return false;
-      if(tar && r.tarifNorm!==tar) return false;
-      if(sub && !stripAccents((r.subagente||'').toLowerCase()).includes(sub)) return false;
-      if(activeEstadoFilter==='__vazio__' && r.estadoContato) return false;
-      if(activeEstadoFilter && activeEstadoFilter!=='__vazio__' && r.estadoContato!==activeEstadoFilter) return false;
-      return true;
-    });
-    sortRecords();
-    page = 1;
-    renderTiles();
-    renderEstadoChips();
-    render();
-  }
-
-  function sortRecords(){
-    const statusRank = {atrasado:0, alerta:1, futuro:2, outro:3};
-    filtered.sort((a,b)=>{
-      let av, bv;
-      if(sortKey==='days'){
-        const ra = statusRank[a.status], rb = statusRank[b.status];
-        if(ra!==rb) return (ra-rb)*sortDir;
-        av = a.days===Infinity? 1e15 : a.days; bv = b.days===Infinity? 1e15 : b.days;
-        return (av-bv)*sortDir;
       }
-      av = (a[sortKey]||''); bv = (b[sortKey]||'');
-      if(av instanceof Date || bv instanceof Date){
-        av = av? av.getTime():-Infinity; bv = bv? bv.getTime():-Infinity;
-        return (av-bv)*sortDir;
-      }
-      return String(av).localeCompare(String(bv),'pt')*sortDir;
-    });
-  }
-
-  const columns = [
-    {key:'cliente', label:'Cliente'},
-    {key:'nif', label:'NIF'},
-    {key:'tarifario', label:'Tarifário'},
-    {key:'contact', label:'Contacto', nosort:true},
-    {key:'localidade', label:'Localidade'},
-    {key:'fimDate', label:'Fim fidelização / estado'},
-    {key:'proxDate', label:'Próx. refidelização'},
-    {key:'estadoContato', label:'Estado do contacto'},
-    {key:'obs', label:'Observações', nosort:true},
-    {key:'actions', label:'', nosort:true},
-  ];
-
-  let editingRowNum = null;
-  let confirmingDeleteRowNum = null;
-  let creatingNew = false;
-
-  function toDateInputValue(dateObj, raw){
-    if(dateObj){
-      const y=dateObj.getFullYear(), m=String(dateObj.getMonth()+1).padStart(2,'0'), d=String(dateObj.getDate()).padStart(2,'0');
-      return `${y}-${m}-${d}`;
-    }
-    if(raw && /^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0,10);
-    return '';
-  }
-
-  function rowHtml(r, mode){
-    // mode: 'view' | 'edit' | 'delete'
-    const badgeClass = r.status==='atrasado'?'critical':r.status==='alerta'?'warning':r.status==='futuro'?'good':'muted';
-    const rowClass = 'row-'+badgeClass + (mode==='edit'?' editing':'') + (mode==='delete'?' deleting':'');
-    if(mode!=='edit'){
-      const contactBits = [r.contato, r.telemovel, r.email].filter(Boolean);
-      const actionsHtml = mode==='delete'
-        ? `<div class="delete-confirm">Apagar este cliente da folha? Não pode ser desfeito.</div>
-           <button class="delete-confirm-btn" type="button">Sim, apagar</button>
-           <button class="delete-cancel-btn" type="button">Cancelar</button>`
-        : `<button class="edit-row-btn" type="button">Editar</button>
-           <button class="delete-row-btn" type="button">Apagar</button>`;
-      return `<tr class="${rowClass}" data-row="${r.rowNum}">
-        <td class="cliente">${esc(r.cliente)}</td>
-        <td>${esc(r.nif||'—')}</td>
-        <td>${esc(r.tarifario||'—')}</td>
-        <td class="contact">${contactBits.map(c=>`<div>${esc(c)}</div>`).join('') || '—'}</td>
-        <td>${esc(r.localidade||'—')}</td>
-        <td class="dates">
-          <span class="badge ${badgeClass}"><span class="ico"></span>${esc(r.statusLabel)}</span>
-          <span class="days">${r.fimDate? fmtDate(r.fimDate) : ''}</span>
-        </td>
-        <td class="dates">${r.proxDate? fmtDate(r.proxDate) : esc(r.proxRaw||'—')}</td>
-        <td class="estado">${r.estadoContato
-          ? `<span class="estado-pill">${esc(r.estadoContato)}</span><span class="estado-date">${r.estadoData? fmtDate(parseISO(r.estadoData)) : ''}</span>`
-          : '—'}</td>
-        <td class="obs"><div class="obs-text">${esc(r.observacoes||'—')}</div></td>
-        <td class="actions">${actionsHtml}</td>
-      </tr>`;
-    }
-    const fimVal = toDateInputValue(r.fimDate, r.fimRaw);
-    const proxVal = toDateInputValue(r.proxDate, r.proxRaw);
-    const estadoOptionsHtml = ['<option value="">Sem estado</option>']
-      .concat(ESTADO_OPTIONS.map(opt=>`<option value="${esc(opt)}"${r.estadoContato===opt?' selected':''}>${esc(opt)}</option>`))
-      .join('');
-    return `<tr class="${rowClass}" data-row="${r.rowNum}">
-      <td><input type="text" class="f-cliente" value="${esc(r.cliente)}"></td>
-      <td><input type="text" class="f-nif" value="${esc(r.nif)}"></td>
-      <td><input type="text" class="f-tarifario" value="${esc(r.tarifario)}"></td>
-      <td class="contact-edit">
-        <input type="text" class="f-contato" placeholder="Contacto" value="${esc(r.contato)}">
-        <input type="text" class="f-telemovel" placeholder="Telemóvel" value="${esc(r.telemovel)}">
-        <input type="text" class="f-email" placeholder="E-mail" value="${esc(r.email)}">
-      </td>
-      <td><input type="text" class="f-localidade" value="${esc(r.localidade)}"></td>
-      <td><input type="date" class="f-fim" value="${fimVal}"></td>
-      <td><input type="date" class="f-prox" value="${proxVal}"></td>
-      <td><select class="f-estado">${estadoOptionsHtml}</select></td>
-      <td><textarea class="f-obs">${esc(r.observacoes==='—'?'':r.observacoes)}</textarea></td>
-      <td class="actions">
-        <button class="save-row-btn" type="button">Guardar</button>
-        <button class="cancel-row-btn" type="button">Cancelar</button>
-      </td>
-    </tr>`;
-  }
-
-  function newRecordRowHtml(){
-    const estadoOptionsHtml = ['<option value="">Sem estado</option>']
-      .concat(ESTADO_OPTIONS.map(opt=>`<option value="${esc(opt)}">${esc(opt)}</option>`))
-      .join('');
-    return `<tr class="row-good new-record">
-      <td><input type="text" class="nf-cliente" placeholder="Nome do cliente"></td>
-      <td><input type="text" class="nf-nif" placeholder="NIF"></td>
-      <td><input type="text" class="nf-tarifario" placeholder="Tarifário"></td>
-      <td class="contact-edit">
-        <input type="text" class="nf-contato" placeholder="Contacto">
-        <input type="text" class="nf-telemovel" placeholder="Telemóvel">
-        <input type="text" class="nf-email" placeholder="E-mail">
-      </td>
-      <td><input type="text" class="nf-localidade" placeholder="Localidade"></td>
-      <td><input type="date" class="nf-fim"></td>
-      <td><input type="date" class="nf-prox"></td>
-      <td><select class="nf-estado">${estadoOptionsHtml}</select></td>
-      <td><textarea class="nf-obs" placeholder="Observações"></textarea></td>
-      <td class="actions">
-        <button class="create-save-btn" type="button">Guardar</button>
-        <button class="create-cancel-btn" type="button">Cancelar</button>
-      </td>
-    </tr>`;
-  }
-
-  function render(){
-    const tableWrap = document.getElementById('tableWrap');
-    const summaryLine = document.getElementById('summaryLine');
-    summaryLine.textContent = `${filtered.length.toLocaleString('pt-PT')} resultado(s) encontrados de ${records.length.toLocaleString('pt-PT')}.`;
-    const start = (page-1)*pageSize;
-    const pageRows = filtered.slice(start, start+pageSize);
-
-    if(pageRows.length===0 && !creatingNew){
-      tableWrap.innerHTML = '<div class="empty">Sem resultados para os filtros aplicados.</div>';
-    } else {
-      let thead = '<thead><tr>' + columns.map(c=>{
-        const sorted = sortKey===c.key || (sortKey==='days' && c.key==='fimDate');
-        return `<th ${c.nosort?'':'data-key="'+c.key+'"'} class="${sorted?'sorted':''}">${c.label}${sorted? (sortDir===1?' ▲':' ▼'):''}</th>`;
-      }).join('') + '</tr></thead>';
-
-      let tbody = '<tbody>' + (creatingNew ? newRecordRowHtml() : '') + pageRows.map(r=>{
-        const mode = r.rowNum===editingRowNum ? 'edit' : (r.rowNum===confirmingDeleteRowNum ? 'delete' : 'view');
-        return rowHtml(r, mode);
-      }).join('') + '</tbody>';
-
-      tableWrap.innerHTML = `<table>${thead}${tbody}</table>`;
-
-      if(creatingNew){
-        const newTr = tableWrap.querySelector('tr.new-record');
-        newTr.querySelector('.nf-cliente').focus();
-        newTr.querySelector('.create-cancel-btn').addEventListener('click', ()=>{ creatingNew = false; render(); });
-        newTr.querySelector('.create-save-btn').addEventListener('click', (e)=> createRecord(newTr, e.currentTarget));
-      }
-
-      tableWrap.querySelectorAll('th[data-key]').forEach(th=>{
-        th.addEventListener('click', ()=>{
-          const key = th.getAttribute('data-key');
-          const mapKey = key==='fimDate' ? 'days' : key;
-          if(sortKey===mapKey){ sortDir*=-1; } else { sortKey=mapKey; sortDir=1; }
-          sortRecords(); render();
-        });
-      });
-
-      tableWrap.querySelectorAll('.edit-row-btn').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          editingRowNum = +btn.closest('tr').getAttribute('data-row');
-          confirmingDeleteRowNum = null;
-          render();
-        });
-      });
-      tableWrap.querySelectorAll('.cancel-row-btn').forEach(btn=>{
-        btn.addEventListener('click', ()=>{ editingRowNum = null; render(); });
-      });
-      tableWrap.querySelectorAll('.save-row-btn').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const tr = btn.closest('tr');
-          const rowNum = +tr.getAttribute('data-row');
-          saveRow(rowNum, tr, btn);
-        });
-      });
-      tableWrap.querySelectorAll('.delete-row-btn').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          confirmingDeleteRowNum = +btn.closest('tr').getAttribute('data-row');
-          editingRowNum = null;
-          render();
-        });
-      });
-      tableWrap.querySelectorAll('.delete-cancel-btn').forEach(btn=>{
-        btn.addEventListener('click', ()=>{ confirmingDeleteRowNum = null; render(); });
-      });
-      tableWrap.querySelectorAll('.delete-confirm-btn').forEach(btn=>{
-        btn.addEventListener('click', ()=>{
-          const tr = btn.closest('tr');
-          const rowNum = +tr.getAttribute('data-row');
-          deleteRow(rowNum, tr, btn);
-        });
-      });
+      return jsonOut({ ok: true, row: newRow, created: true });
     }
 
-    const totalPages = Math.max(1, Math.ceil(filtered.length/pageSize));
-    document.getElementById('pageInfo').textContent = `Página ${page} de ${totalPages} — a mostrar ${pageRows.length? start+1:0}–${start+pageRows.length} de ${filtered.length.toLocaleString('pt-PT')}`;
-    document.getElementById('prevPage').disabled = page<=1;
-    document.getElementById('nextPage').disabled = page>=totalPages;
-  }
-
-  function saveRow(rowNum, tr, btn){
-    const val = sel => tr.querySelector(sel).value;
-    const cliente = val('.f-cliente').trim();
-    const nif = val('.f-nif').trim();
-    const tarifario = val('.f-tarifario').trim();
-    const contato = val('.f-contato').trim();
-    const telemovel = val('.f-telemovel').trim();
-    const email = val('.f-email').trim();
-    const localidade = val('.f-localidade').trim();
-    const fim = val('.f-fim');
-    const prox = val('.f-prox');
-    const estadoContato = val('.f-estado');
-    const observacoes = tr.querySelector('.f-obs').value;
-
-    btn.disabled = true;
-    btn.textContent = 'A guardar…';
-    const cancelBtn = tr.querySelector('.cancel-row-btn');
-    if(cancelBtn) cancelBtn.disabled = true;
-    setSyncState('saving');
-
-    const rec = records.find(r=>r.rowNum===rowNum);
-    // Só grava uma nova data quando o "Estado do contacto" realmente muda —
-    // assim a data reflete o dia em que a opção foi escolhida, não o dia da gravação.
-    const estadoChanged = rec && rec.estadoContato !== estadoContato;
-    const estadoData = estadoChanged ? (estadoContato ? todayISO() : '') : (rec? rec.estadoData : '');
-
-    const updates = {
-      G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
-      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes
-    };
-
-    fetch(API_URL, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({ token: TOKEN, row: rowNum, updates })
-    }).then(r=>r.json()).then(res=>{
-      if(!res.ok){ throw new Error(res.error||'erro'); }
-      if(rec){
-        rec.cliente = cliente; rec.nif = nif; rec.tarifario = tarifario; rec.tarifNorm = tarifario.toUpperCase();
-        rec.contato = contato; rec.telemovel = telemovel; rec.email = email; rec.localidade = localidade;
-        rec.observacoes = observacoes;
-        rec.estadoContato = estadoContato; rec.estadoData = estadoData;
-        rec.fimRaw = fim || null; rec.fimDate = parseISO(fim);
-        rec.proxRaw = prox || null; rec.proxDate = parseISO(prox);
-        const days = rec.fimDate ? Math.round((rec.fimDate - today)/86400000) : Infinity;
-        const s = statusFromDays(days, rec.fimRaw);
-        rec.days = days; rec.status = s.status; rec.statusLabel = s.statusLabel;
-        rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
+    if (body.action === 'sendProposal') {
+      var to = body.to;
+      var subject = body.subject || 'Proposta';
+      var htmlBody = body.html || '';
+      if (!to) {
+        return jsonOut({ ok: false, error: 'sem e-mail do cliente' });
       }
-      editingRowNum = null;
-      setSyncState('ok');
-      populateFilterOptions();
-      applyFilters();
-    }).catch(err=>{
-      setSyncState('error');
-      btn.disabled = false;
-      btn.textContent = 'Guardar';
-      if(cancelBtn) cancelBtn.disabled = false;
-      let flag = tr.querySelector('.save-flag');
-      if(!flag){
-        flag = document.createElement('span');
-        flag.className = 'save-flag error';
-        tr.querySelector('.actions').appendChild(flag);
-      }
-      flag.textContent = 'Falha ao guardar: ' + err.message;
-    });
-  }
-
-  function deleteRow(rowNum, tr, btn){
-    btn.disabled = true;
-    btn.textContent = 'A apagar…';
-    const cancelBtn = tr.querySelector('.delete-cancel-btn');
-    if(cancelBtn) cancelBtn.disabled = true;
-    setSyncState('saving');
-
-    fetch(API_URL, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({ token: TOKEN, row: rowNum, action: 'delete' })
-    }).then(r=>r.json()).then(res=>{
-      if(!res.ok){ throw new Error(res.error||'erro'); }
-      // A linha foi removida na folha, o que faz subir uma posição a todas as
-      // linhas seguintes — atualizamos os rowNum em memória para se manterem
-      // corretos sem precisar de recarregar tudo.
-      records = records.filter(r=>r.rowNum!==rowNum);
-      records.forEach(r=>{ if(r.rowNum > rowNum) r.rowNum -= 1; });
-      confirmingDeleteRowNum = null;
-      setSyncState('ok');
-      populateFilterOptions();
-      applyFilters();
-    }).catch(err=>{
-      setSyncState('error');
-      btn.disabled = false;
-      btn.textContent = 'Sim, apagar';
-      if(cancelBtn) cancelBtn.disabled = false;
-      let flag = tr.querySelector('.save-flag');
-      if(!flag){
-        flag = document.createElement('span');
-        flag.className = 'save-flag error';
-        tr.querySelector('.actions').appendChild(flag);
-      }
-      flag.textContent = 'Falha ao apagar: ' + err.message;
-    });
-  }
-
-  function createRecord(tr, btn){
-    const val = sel => tr.querySelector(sel).value;
-    const cliente = val('.nf-cliente').trim();
-    const nif = val('.nf-nif').trim();
-    const tarifario = val('.nf-tarifario').trim();
-    const contato = val('.nf-contato').trim();
-    const telemovel = val('.nf-telemovel').trim();
-    const email = val('.nf-email').trim();
-    const localidade = val('.nf-localidade').trim();
-    const fim = val('.nf-fim');
-    const prox = val('.nf-prox');
-    const estadoContato = val('.nf-estado');
-    const observacoes = tr.querySelector('.nf-obs').value;
-
-    if(!cliente){
-      let flag = tr.querySelector('.save-flag');
-      if(!flag){
-        flag = document.createElement('span');
-        flag.className = 'save-flag error';
-        tr.querySelector('.actions').appendChild(flag);
-      }
-      flag.textContent = 'Indica pelo menos o nome do cliente.';
-      tr.querySelector('.nf-cliente').focus();
-      return;
+      MailApp.sendEmail({
+        to: to,
+        subject: subject,
+        htmlBody: htmlBody,
+        body: 'A tua proposta segue neste e-mail — ativa a visualização em HTML para a veres formatada.'
+      });
+      return jsonOut({ ok: true, sent: true });
     }
 
-    btn.disabled = true;
-    btn.textContent = 'A guardar…';
-    const cancelBtn = tr.querySelector('.create-cancel-btn');
-    if(cancelBtn) cancelBtn.disabled = true;
-    setSyncState('saving');
+    var row = body.row;
+    if (!row || row < FIRST_DATA_ROW) {
+      return jsonOut({ ok: false, error: 'linha inválida' });
+    }
+    var lastRow = sheet.getLastRow();
+    if (row > lastRow) {
+      return jsonOut({ ok: false, error: 'linha inválida' });
+    }
 
-    const estadoData = estadoContato ? todayISO() : '';
-    const values = {
-      G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
-      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes
-    };
+    if (body.action === 'delete') {
+      sheet.deleteRow(row);
+      return jsonOut({ ok: true, row: row, deleted: true });
+    }
 
-    fetch(API_URL, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({ token: TOKEN, action: 'create', values })
-    }).then(r=>r.json()).then(res=>{
-      if(!res.ok){ throw new Error(res.error||'erro'); }
-      const fimDate = parseISO(fim);
-      const proxDate = parseISO(prox);
-      const days = fimDate ? Math.round((fimDate - today)/86400000) : Infinity;
-      const s = statusFromDays(days, fim);
-      const rec = {
-        rowNum: res.row,
-        cliente, nif, subagente: '',
-        tarifario, tarifNorm: tarifario.toUpperCase(),
-        localidade, contato, email, telemovel, observacoes,
-        estadoContato, estadoData,
-        fimDate, fimRaw: fim || null, proxDate, proxRaw: prox || null,
-        status: s.status, statusLabel: s.statusLabel, days
-      };
-      rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
-      records.unshift(rec);
-      creatingNew = false;
-      setSyncState('ok');
-      populateFilterOptions();
-      applyFilters();
-    }).catch(err=>{
-      setSyncState('error');
-      btn.disabled = false;
-      btn.textContent = 'Guardar';
-      if(cancelBtn) cancelBtn.disabled = false;
-      let flag = tr.querySelector('.save-flag');
-      if(!flag){
-        flag = document.createElement('span');
-        flag.className = 'save-flag error';
-        tr.querySelector('.actions').appendChild(flag);
+    var updates = body.updates || {}; // ex: {"Q": "texto novo", "D": "2026-08-01"}
+    var applied = {};
+    for (var key in updates) {
+      var idx = colLetters.indexOf(key.toUpperCase());
+      if (idx > -1) {
+        sheet.getRange(row, idx + 1).setValue(updates[key]);
+        applied[key] = updates[key];
       }
-      flag.textContent = 'Falha ao guardar: ' + err.message;
-    });
+    }
+    return jsonOut({ ok: true, row: row, applied: applied });
+  } catch (err) {
+    return jsonOut({ ok: false, error: String(err) });
   }
+}
 
-  function exportXls(){
-    const headers = ['Cliente','NIF','Tarifário','Subagente','Contacto','Telemóvel','E-mail','Localidade','Fim de fidelização','Estado da fidelização','Próxima refidelização','Estado do contacto','Data do estado','Observações'];
-    const aoa = [headers];
-    filtered.forEach(r=>{
-      aoa.push([r.cliente,r.nif,r.tarifario,r.subagente,r.contato,r.telemovel,r.email,r.localidade,
-        r.fimDate? fmtDate(r.fimDate): (r.fimRaw||''), r.statusLabel,
-        r.proxDate? fmtDate(r.proxDate): (r.proxRaw||''),
-        r.estadoContato||'', r.estadoData? fmtDate(parseISO(r.estadoData)): '',
-        r.observacoes]);
-    });
-    const ws = XLSX.utils.aoa_to_sheet(aoa);
-    ws['!cols'] = headers.map((h,i)=>{
-      let max = h.length;
-      aoa.forEach(row=>{ const v = row[i]; if(v!=null){ max = Math.max(max, String(v).length); } });
-      return { wch: Math.min(Math.max(max+2, 10), 45) };
-    });
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Fidelizações');
-    const stamp = new Date();
-    const y = stamp.getFullYear(), m = String(stamp.getMonth()+1).padStart(2,'0'), d = String(stamp.getDate()).padStart(2,'0');
-    XLSX.writeFile(wb, `fidelizacoes_filtrado_${y}${m}${d}.xlsx`);
+function formatCell(v) {
+  // Nota: evitamos Utilities.formatDate aqui de propósito — é uma chamada de
+  // serviço "pesada" e, repetida para milhares de células, torna o pedido
+  // lentíssimo (chegou a demorar mais de um minuto com ~15.500 linhas).
+  // Usamos apenas métodos nativos de Date, muito mais rápidos.
+  if (Object.prototype.toString.call(v) === '[object Date]') {
+    var y = v.getFullYear();
+    var m = ('0' + (v.getMonth() + 1)).slice(-2);
+    var d = ('0' + v.getDate()).slice(-2);
+    return y + '-' + m + '-' + d;
   }
-})();
-</script>
-</body>
-</html>
+  return v;
+}
+
+function jsonOut(obj) {
+  return ContentService.createTextOutput(JSON.stringify(obj))
+    .setMimeType(ContentService.MimeType.JSON);
+}
