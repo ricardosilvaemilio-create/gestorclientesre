@@ -275,11 +275,6 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <select id="tarifFilter"><option value="">Todos</option></select>
       </div>
       <div class="field">
-        <label for="subFilter">Subagente</label>
-        <input id="subFilter" type="text" list="subList" placeholder="Todos">
-        <datalist id="subList"></datalist>
-      </div>
-      <div class="field">
         <label>Estado do contacto</label>
         <div class="estado-chips" id="estadoContatoChips"></div>
       </div>
@@ -313,6 +308,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
             <select id="proposalTemplateSelect">
               <option value="">— escolhe um tarifário —</option>
             </select>
+          </div>
+          <div class="field" style="margin-bottom:14px;">
+            <label for="proposalIntro">Texto de abertura do e-mail</label>
+            <textarea id="proposalIntro" rows="5" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text-primary);resize:vertical;"></textarea>
+          </div>
+          <div class="field" style="margin-bottom:14px;">
+            <label for="proposalOutro">Texto de confirmação (aparece a negrito, antes da tabela)</label>
+            <textarea id="proposalOutro" rows="2" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text-primary);resize:vertical;"></textarea>
           </div>
           <div id="proposalGridWrap"></div>
         </div>
@@ -412,7 +415,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function paramsFromLocation(){
     const p = new URLSearchParams(location.search);
-    return { api: p.get('api')||'', token: p.get('token')||'' };
+        const DEFAULT_API = 'https://script.google.com/macros/s/AKfycbxwB1rlRKc12T1QzWFNZ_zcffOpkGONqLa4cNTucegLBjRKyNHlhekpH8BiR3Cng9Ua/exec';
+    const DEFAULT_TOKEN = 'vOJtAuuqkgE6_9Xo0hsOjjRm73-36jMi';
+    return { api: p.get('api')||DEFAULT_API, token: p.get('token')||DEFAULT_TOKEN };
   }
   const initial = paramsFromLocation();
   // Só pré-preenchemos os campos visíveis quando NÃO vamos ligar automaticamente —
@@ -505,7 +510,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   document.getElementById('refreshBtn').addEventListener('click', ()=>loadData(false));
 
   // ---------- App ----------
-  let tarifSelEl, subListEl, tilesWrap, estadoChipsWrap, activeStatus = '', activeEstadoFilter = '';
+  let tarifSelEl, tilesWrap, estadoChipsWrap, activeStatus = '', activeEstadoFilter = '';
   const tilesDef = [
     {key:'atrasado', label:'Atrasado', dot:'critical', desc:'já passou a data'},
     {key:'alerta', label:'Em alerta', dot:'warning', desc:`dentro de ${ALERT_WINDOW_DAYS} dias`},
@@ -520,7 +525,6 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function initApp(){
     tarifSelEl = document.getElementById('tarifFilter');
-    subListEl = document.getElementById('subList');
     tilesWrap = document.getElementById('tiles');
     estadoChipsWrap = document.getElementById('estadoContatoChips');
 
@@ -529,12 +533,10 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     document.getElementById('search').addEventListener('input', debounce(applyFilters,150));
     document.getElementById('statusFilter').addEventListener('change', applyFilters);
     tarifSelEl.addEventListener('change', applyFilters);
-    document.getElementById('subFilter').addEventListener('input', debounce(applyFilters,150));
     document.getElementById('clearFilters').addEventListener('click', ()=>{
       document.getElementById('search').value='';
       document.getElementById('statusFilter').value='';
       tarifSelEl.value='';
-      document.getElementById('subFilter').value='';
       activeStatus='';
       activeEstadoFilter='';
       applyFilters();
@@ -596,10 +598,6 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     tarifSelEl.innerHTML = '<option value="">Todos</option>';
     tarifs.forEach(t=>{ const o=document.createElement('option'); o.value=t.norm; o.textContent=t.label; tarifSelEl.appendChild(o); });
     tarifSelEl.value = prevTarif;
-
-    const subs = [...new Set(records.map(r=>r.subagente).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt'));
-    subListEl.innerHTML = '';
-    subs.forEach(s=>{ const o=document.createElement('option'); o.value=s; subListEl.appendChild(o); });
   }
 
   // renderTiles()/renderEstadoChips() recontam TODOS os registos e reconstroem
@@ -663,13 +661,11 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const q = stripAccents(document.getElementById('search').value.trim().toLowerCase());
     const st = document.getElementById('statusFilter').value;
     const tar = tarifSelEl.value;
-    const sub = stripAccents(document.getElementById('subFilter').value.trim().toLowerCase());
     activeStatus = st;
     filtered = records.filter(r=>{
       if(q && !r.searchBlob.includes(q)) return false;
       if(st && r.status!==st) return false;
       if(tar && r.tarifNorm!==tar) return false;
-      if(sub && !stripAccents((r.subagente||'').toLowerCase()).includes(sub)) return false;
       if(activeEstadoFilter==='__vazio__' && r.estadoContato) return false;
       if(activeEstadoFilter && activeEstadoFilter!=='__vazio__' && r.estadoContato!==activeEstadoFilter) return false;
       return true;
@@ -1089,10 +1085,15 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   const PROPOSTAS_NAMES = Object.keys(PROPOSTAS_CATALOG).sort((a,b)=>a.localeCompare(b,'pt'));
   let proposalRec = null;
 
+  const DEFAULT_PROPOSAL_INTRO = 'Espero que se encontre bem.\n\nConforme combinado, envio proposta de renegociação ao contrato MEO Empresas, através de uma tabela comparativa entre os serviços que tem atualmente e os serviços que estou a propor, destacando, a fundo azul, os benefícios.';
+  const DEFAULT_PROPOSAL_OUTRO = 'Caso concorde com as condições, responda a este e-mail a indicar que aceita as novas condições.';
+
   function openProposalModal(rec){
     proposalRec = rec;
     document.getElementById('proposalTitle').textContent = `Proposta para ${rec.cliente}`;
     document.getElementById('proposalTemplateSelect').value = '';
+    document.getElementById('proposalIntro').value = DEFAULT_PROPOSAL_INTRO;
+    document.getElementById('proposalOutro').value = DEFAULT_PROPOSAL_OUTRO;
     document.getElementById('proposalGridWrap').innerHTML = '';
     document.getElementById('proposalSendBtn').disabled = true;
     document.getElementById('proposalSendBtn').textContent = 'Enviar por e-mail ao cliente';
@@ -1120,7 +1121,10 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       return;
     }
     // Clona os dados do modelo — nunca alteramos o catálogo original.
-    const grid = PROPOSTAS_CATALOG[sheetName].map(row=>row.slice());
+    // Alguns modelos (ex: "Gcp (N)") trazem 2 colunas extra à direita que
+    // apenas repetem as etiquetas das colunas 0/1, por simetria visual na
+    // folha Excel original — não têm informação própria, por isso ignoramo-las.
+    const grid = PROPOSTAS_CATALOG[sheetName].map(row=>row.slice(0,4));
 
     // Os modelos trazem morada/nº de conta de quem os criou originalmente —
     // substituímos pela morada deste cliente e limpamos o nº de conta, para
@@ -1196,10 +1200,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       while(cells.length < colCount) cells.push('');
       const label = (cells[0]||'').trim();
       const restFilled = cells.slice(1).some(v=>(v||'').trim()!=='');
-      const isHeaderRow = cells.some(v=>{
+      // cabeçalho ATUALMENTE/PROPOSTA — normalmente etiqueta exata, mas em
+      // alguns modelos vem como "ATUALMENTE <nome do tarifário>" (célula com
+      // quebra de linha no Excel original, dividida em 2 linhas na extração).
+      const isHeaderCell = v => {
         const t = (v||'').trim().toUpperCase();
-        return t==='ATUALMENTE' || t==='PROPOSTA';
-      });
+        return t.indexOf('ATUALMENTE')===0 || t.indexOf('PROPOSTA')===0;
+      };
+      const isHeaderRow = !label && cells.slice(2).some(isHeaderCell);
       const isBenefit = label.indexOf('>')===0;
       const isLabelValue = /:$/.test(label); // ex: "MORADA:", "Nº DE CONTA:" — par etiqueta/valor, não título
       const isSectionTitle = label && !restFilled && isUpperish(label) && label.length > 3 && !isLabelValue;
@@ -1209,8 +1217,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       html += '<tr>';
       if(isHeaderRow){
         cells.forEach(val=>{
-          const t = (val||'').trim().toUpperCase();
-          const bg = (t==='ATUALMENTE'||t==='PROPOSTA') ? GREY : '';
+          const bg = isHeaderCell(val) ? GREY : '';
           html += `<td style="padding:6px 10px;${BORDER}${bg}${FONT}font-size:13px;font-weight:bold;text-align:center;">${esc(val||'')}</td>`;
         });
       } else if(isBenefit){
@@ -1238,6 +1245,27 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     return html;
   }
 
+  function paragraphsToHtml(text, opts){
+    opts = opts || {};
+    const FONT = 'font-family:Calibri,Arial,Helvetica,sans-serif;';
+    const weight = opts.bold ? 'font-weight:bold;' : '';
+    return (text||'').split(/\n\s*\n/).map(para=>para.trim()).filter(Boolean).map(para=>{
+      let safe = esc(para).replace(/\n/g, '<br>');
+      safe = safe.replace(/fundo azul/gi, '<b>$&</b>');
+      return `<p style="${FONT}font-size:13px;${weight}margin:0 0 12px 0;">${safe}</p>`;
+    }).join('');
+  }
+
+  function buildProposalEmailHtml(){
+    const intro = document.getElementById('proposalIntro').value;
+    const outro = document.getElementById('proposalOutro').value;
+    let html = '';
+    if(intro.trim()) html += paragraphsToHtml(intro);
+    if(outro.trim()) html += paragraphsToHtml(outro, {bold:true});
+    html += proposalGridToHtml();
+    return html;
+  }
+
   function sendProposal(){
     if(!proposalRec) return;
     const sheetName = document.getElementById('proposalTemplateSelect').value;
@@ -1249,7 +1277,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     sendBtn.textContent = 'A enviar…';
     setProposalStatus('A enviar…');
 
-    const html = proposalGridToHtml();
+    const html = buildProposalEmailHtml();
     const subject = `Proposta ${sheetName} — ${proposalRec.cliente}`;
 
     fetch(API_URL, {
