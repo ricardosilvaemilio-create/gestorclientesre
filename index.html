@@ -1,162 +1,1235 @@
-// ===================================================================
-// Script de ligação entre a Google Sheet "Base de dados de clientes"
-// e o painel de Gestão de Fidelizações.
-//
-// COMO USAR:
-// 1. Abre a tua Google Sheet (a que tem o separador "Geral" com os
-//    dados dos clientes).
-// 2. Menu: Extensões > Apps Script.
-// 3. Apaga o conteúdo que lá estiver e cola este ficheiro inteiro.
-// 4. Clica em "Implementar" (Deploy) > "Nova implementação".
-//    - Tipo: "Aplicação Web" (Web app)
-//    - Executar como: Eu (a tua conta)
-//    - Quem tem acesso: Qualquer pessoa (Anyone)
-// 5. Autoriza as permissões pedidas (é o teu próprio script, é seguro).
-// 6. Copia o URL gerado (termina em /exec) e envia-mo no chat.
-//
-// Mantém o TOKEN abaixo privado — é a única coisa que impede que
-// outra pessoa com o URL leia ou escreva na tua folha (protege
-// leituras e escritas).
-// ===================================================================
-
-var SHEET_NAME = 'Geral';
-var TOKEN = 'vOJtAuuqkgE6_9Xo0hsOjjRm73-36jMi'; // não partilhes isto
-var HEADER_ROW = 1;
-var FIRST_DATA_ROW = 2;
-var LAST_COL = 19; // colunas A (Data Ativação) até S (Data do estado)
-// R = Estado do contacto, S = Data do estado — precisas de acrescentar estas
-// duas colunas (com cabeçalho) à folha antes de publicares esta versão.
-
-var PAGE_SIZE = 2000; // linhas por pedido — evita uma única execução gigante e lenta
-
-function doGet(e) {
-  var token = e && e.parameter ? e.parameter.token : null;
-  if (token !== TOKEN) {
-    return jsonOut({ ok: false, error: 'token inválido' });
+<!DOCTYPE html>
+<html lang="pt-PT">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gestão de Fidelizações — Clientes</title>
+<style>
+:root{
+  color-scheme: light;
+  --surface-1:#fcfcfb; --page:#f9f9f7; --card:#ffffff;
+  --text-primary:#0b0b0b; --text-secondary:#52514e; --text-muted:#898781;
+  --grid:#e1e0d9; --border:rgba(11,11,11,0.10); --baseline:#c3c2b7;
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
+  --good-bg:#e7f7e7; --warning-bg:#fff4de; --serious-bg:#fdece4; --critical-bg:#fbe4e4;
+  --muted-bg:#eeede9; --blue:#2a78d6; --blue-bg:#e8f0fc;
+}
+@media (prefers-color-scheme: dark){
+  :root:where(:not([data-theme="light"])){
+    color-scheme: dark;
+    --surface-1:#1a1a19; --page:#0d0d0d; --card:#221f1e;
+    --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#898781;
+    --grid:#2c2c2a; --border:rgba(255,255,255,0.10); --baseline:#383835;
+    --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#e66767;
+    --good-bg:#123312; --warning-bg:#3a2c0c; --serious-bg:#3a2018; --critical-bg:#3a1717;
+    --muted-bg:#2a2a28; --blue:#3987e5; --blue-bg:#152840;
   }
-  var sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
-  var lastRow = sheet.getLastRow();
-  var totalDataRows = Math.max(0, lastRow - FIRST_DATA_ROW + 1);
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --surface-1:#1a1a19; --page:#0d0d0d; --card:#221f1e;
+  --text-primary:#ffffff; --text-secondary:#c3c2b7; --text-muted:#898781;
+  --grid:#2c2c2a; --border:rgba(255,255,255,0.10); --baseline:#383835;
+  --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#e66767;
+  --good-bg:#123312; --warning-bg:#3a2c0c; --serious-bg:#3a2018; --critical-bg:#3a1717;
+  --muted-bg:#2a2a28; --blue:#3987e5; --blue-bg:#152840;
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--page); color:var(--text-primary);
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-size:14px;
+}
+.wrap{max-width:1400px; margin:0 auto; padding:24px 20px 60px;}
+header.top{display:flex; justify-content:space-between; align-items:flex-start; gap:16px; margin-bottom:20px; flex-wrap:wrap;}
+h1{font-size:20px; margin:0 0 4px;}
+.subtitle{color:var(--text-secondary); font-size:13px;}
+.theme-toggle{
+  border:1px solid var(--border); background:var(--card); color:var(--text-secondary);
+  border-radius:8px; padding:6px 12px; font-size:13px; cursor:pointer;
+}
+.tiles{display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin-bottom:20px;}
+.tile{
+  background:var(--card); border:1px solid var(--border); border-radius:12px;
+  padding:14px 16px; cursor:pointer; transition:box-shadow .15s;
+}
+.tile:hover{box-shadow:0 2px 8px var(--border);}
+.tile.active{outline:2px solid var(--blue);}
+.tile .label{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); font-weight:600; text-transform:uppercase; letter-spacing:.02em;}
+.tile .value{font-size:28px; font-weight:700; margin-top:6px; font-variant-numeric:tabular-nums;}
+.dot{width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0;}
+.dot.critical{background:var(--critical);} .dot.warning{background:var(--warning);}
+.dot.good{background:var(--blue);} .dot.muted{background:var(--text-muted);}
 
-  var offset = parseInt((e.parameter && e.parameter.offset) || '0', 10) || 0;
-  var limit = parseInt((e.parameter && e.parameter.limit) || String(PAGE_SIZE), 10) || PAGE_SIZE;
+.filters{
+  background:var(--card); border:1px solid var(--border); border-radius:12px;
+  padding:14px 16px; margin-bottom:16px; display:flex; gap:10px; flex-wrap:wrap; align-items:end;
+}
+.field{display:flex; flex-direction:column; gap:4px;}
+.field label{font-size:11px; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:.02em;}
+.field input, .field select{
+  border:1px solid var(--baseline); border-radius:8px; padding:7px 10px; font-size:13px;
+  background:var(--surface-1); color:var(--text-primary); min-width:160px;
+}
+.field input:focus, .field select:focus{outline:2px solid var(--blue); outline-offset:1px;}
+#search{min-width:260px;}
+.estado-chips{display:flex; gap:6px; flex-wrap:wrap; align-items:center; height:34px;}
+.estado-chip{
+  font-size:12px; padding:0 10px; height:34px; border-radius:8px; border:1px solid var(--baseline);
+  background:var(--surface-1); color:var(--text-primary); cursor:pointer; white-space:nowrap;
+  display:inline-flex; align-items:center; gap:5px;
+}
+.estado-chip:hover{background:var(--muted-bg);}
+.estado-chip.active{background:var(--blue); border-color:var(--blue); color:#fff;}
+.estado-chip .n{font-variant-numeric:tabular-nums; opacity:.75; font-size:11px;}
+.btn{
+  border:1px solid var(--baseline); background:var(--surface-1); color:var(--text-primary);
+  border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer; height:34px;
+}
+.btn:hover{background:var(--muted-bg);}
+.btn.primary{background:var(--blue); border-color:var(--blue); color:#fff;}
+.btn:disabled{opacity:.5; cursor:not-allowed;}
 
-  if (totalDataRows <= 0) {
-    return jsonOut({ headers: headerRow_(sheet), rows: [], total: 0, offset: 0, hasMore: false });
+.summary-line{color:var(--text-secondary); font-size:13px; margin:0 0 10px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+.sync-dot{width:8px; height:8px; border-radius:50%; background:var(--good); display:inline-block;}
+.sync-dot.saving{background:var(--warning);}
+.sync-dot.error{background:var(--critical);}
+
+table{width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; border:1px solid var(--border);}
+thead th{
+  text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.02em; color:var(--text-muted);
+  padding:10px 12px; border-bottom:1px solid var(--grid); cursor:pointer; white-space:nowrap; user-select:none;
+  position:sticky; top:0; background:var(--card); z-index:1;
+}
+thead th:hover{color:var(--text-primary);}
+thead th.sorted{color:var(--blue);}
+tbody tr{border-bottom:1px solid var(--grid);}
+tbody tr:last-child{border-bottom:none;}
+tbody tr:hover{background:var(--muted-bg);}
+td{padding:10px 12px; vertical-align:top; font-size:13px;}
+td.cliente{font-weight:600; max-width:220px;}
+td.contact{font-size:12px; color:var(--text-secondary); max-width:170px;}
+td.contact div{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+td.obs{max-width:280px; color:var(--text-secondary); font-size:12.5px;}
+td.dates{white-space:nowrap; font-variant-numeric:tabular-nums; font-size:12.5px;}
+td.dates .days{display:block; font-size:11px; margin-top:2px;}
+td.estado{white-space:nowrap; font-size:12.5px;}
+
+.obs-text{white-space:pre-wrap; min-height:18px; border-radius:6px; padding:3px 5px; margin:-3px -5px;}
+.estado-pill{
+  display:inline-block; padding:2px 9px; border-radius:100px; background:var(--blue-bg); color:var(--blue);
+  font-size:11.5px; font-weight:600; white-space:nowrap;
+}
+.estado-date{display:block; font-size:11px; color:var(--text-muted); margin-top:3px;}
+
+tr.editing, tr.new-record{background:var(--blue-bg);}
+td input[type=text], td input[type=date], td select{
+  width:100%; padding:5px 7px; border:1px solid var(--baseline); border-radius:6px;
+  font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary);
+}
+td textarea{
+  width:100%; min-height:60px; border:1px solid var(--blue); border-radius:6px; padding:6px;
+  font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary); resize:vertical;
+}
+.contact-edit{display:flex; flex-direction:column; gap:4px;}
+td.actions{white-space:nowrap; min-width:130px;}
+.edit-row-btn, .save-row-btn, .cancel-row-btn, .delete-row-btn, .delete-confirm-btn, .delete-cancel-btn{
+  font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--baseline);
+  background:var(--surface-1); cursor:pointer; display:block; width:100%; margin-bottom:4px;
+}
+.save-row-btn{background:var(--blue); color:#fff; border-color:var(--blue);}
+.delete-row-btn, .delete-confirm-btn{color:var(--critical); border-color:var(--critical);}
+.delete-confirm-btn{background:var(--critical); color:#fff;}
+.delete-confirm{font-size:11px; color:var(--critical); margin-bottom:6px; line-height:1.4;}
+tr.deleting{background:var(--critical-bg);}
+.save-flag{font-size:10.5px; color:var(--good); margin-left:6px; display:block; margin-top:4px;}
+.save-flag.error{color:var(--critical);}
+
+.badge{
+  display:inline-flex; align-items:center; gap:5px; padding:3px 9px; border-radius:100px;
+  font-size:11.5px; font-weight:600; white-space:nowrap;
+}
+.badge .ico{width:7px; height:7px; border-radius:50%; flex-shrink:0;}
+.badge.critical{background:var(--critical-bg); color:var(--critical);}
+.badge.warning{background:var(--warning-bg); color:#8a5a00;}
+.badge.good{background:var(--blue-bg); color:var(--blue);}
+.badge.muted{background:var(--muted-bg); color:var(--text-secondary);}
+tr.row-critical td.dates{border-left:3px solid var(--critical); padding-left:9px;}
+tr.row-warning td.dates{border-left:3px solid var(--warning); padding-left:9px;}
+tr.row-good td.dates{border-left:3px solid var(--blue); padding-left:9px;}
+tr.row-muted td.dates{border-left:3px solid var(--baseline); padding-left:9px;}
+
+.pager{display:flex; justify-content:space-between; align-items:center; margin-top:14px; gap:10px; flex-wrap:wrap;}
+.pager .info{color:var(--text-secondary); font-size:12.5px;}
+.pager .controls{display:flex; gap:6px; align-items:center;}
+.empty{padding:40px; text-align:center; color:var(--text-muted);}
+footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:center;}
+
+/* Login / connect gate */
+.gate{
+  max-width:460px; margin:80px auto; background:var(--card); border:1px solid var(--border);
+  border-radius:14px; padding:28px 28px 24px;
+}
+.gate h2{margin:0 0 6px; font-size:18px;}
+.gate p{color:var(--text-secondary); font-size:13px; line-height:1.5; margin:0 0 18px;}
+.gate .field{margin-bottom:12px;}
+.gate .field input{width:100%; min-width:0;}
+.gate .error{color:var(--critical); font-size:12.5px; margin-top:10px; display:none;}
+.gate .error.show{display:block;}
+.gate button{width:100%; margin-top:6px;}
+.hidden{display:none !important;}
+
+.proposta-btn{
+  font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--blue);
+  background:var(--surface-1); color:var(--blue); cursor:pointer; display:block; width:100%; margin-bottom:4px;
+}
+.proposta-btn:hover{background:var(--blue-bg);}
+
+.modal-overlay{
+  position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:50;
+  display:flex; align-items:center; justify-content:center; padding:24px;
+}
+.modal-panel{
+  background:var(--card); border-radius:14px; border:1px solid var(--border);
+  width:100%; max-width:900px; max-height:88vh; display:flex; flex-direction:column;
+  box-shadow:0 10px 40px rgba(0,0,0,0.35);
+}
+.modal-header{
+  display:flex; justify-content:space-between; align-items:center;
+  padding:16px 20px; border-bottom:1px solid var(--grid);
+}
+.modal-header h2{margin:0; font-size:16px;}
+.modal-close{
+  border:none; background:transparent; color:var(--text-secondary); font-size:16px;
+  cursor:pointer; padding:4px 8px; border-radius:6px;
+}
+.modal-close:hover{background:var(--muted-bg);}
+.modal-body{padding:16px 20px; overflow-y:auto; flex:1;}
+.modal-footer{
+  display:flex; align-items:center; justify-content:flex-end; gap:10px;
+  padding:14px 20px; border-top:1px solid var(--grid);
+}
+.proposal-status{margin-right:auto; font-size:12.5px; color:var(--text-secondary);}
+.proposal-status.error{color:var(--critical);}
+.proposal-status.ok{color:var(--good);}
+
+table.proposal-grid{width:100%; border-collapse:collapse;}
+table.proposal-grid td{padding:2px; border:1px solid var(--grid);}
+table.proposal-grid input{
+  width:100%; min-width:80px; border:1px solid transparent; border-radius:4px; padding:5px 6px;
+  font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary);
+}
+table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div id="gate" class="gate">
+    <h2>Gestão de Fidelizações</h2>
+    <p>Este painel não guarda dados de clientes no código — liga-se em direto à tua Google Sheet através do Apps Script. Introduz o URL e o token que configuraste (ver o ficheiro Code.gs).</p>
+    <div class="field">
+      <label for="apiUrl">URL da aplicação Web (Apps Script)</label>
+      <input id="apiUrl" type="text" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <div class="field">
+      <label for="apiToken">Token de acesso</label>
+      <input id="apiToken" type="password" placeholder="o teu token" autocomplete="new-password" autocorrect="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <button class="btn primary" id="connectBtn">Ligar</button>
+    <div class="error" id="gateError"></div>
+    <p style="margin-top:14px;font-size:11.5px;">Dica: guarda um marcador (bookmark) com <code>?api=URL&token=TOKEN</code> no fim do link desta página para entrares automaticamente da próxima vez, em qualquer computador.</p>
+  </div>
+
+  <div id="app" class="hidden">
+    <header class="top">
+      <div>
+        <h1>Gestão de Fidelizações</h1>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button class="btn primary" id="newRecordBtn">+ Novo cliente</button>
+        <button class="btn" id="refreshBtn">↻ Atualizar</button>
+        <button class="theme-toggle" id="themeToggle">🌓 Tema</button>
+      </div>
+    </header>
+
+    <div class="tiles" id="tiles"></div>
+
+    <div class="filters">
+      <div class="field" style="flex:1;">
+        <label for="search">Pesquisar</label>
+        <input id="search" type="text" placeholder="Cliente, NIF, contacto, e-mail, subagente, observações…">
+      </div>
+      <div class="field">
+        <label for="statusFilter">Estado da fidelização</label>
+        <select id="statusFilter">
+          <option value="">Todos</option>
+          <option value="atrasado">Atrasado</option>
+          <option value="alerta">Em alerta</option>
+          <option value="futuro">Futuro</option>
+          <option value="outro">Sem fidelização / outro</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="tarifFilter">Tarifário</label>
+        <select id="tarifFilter"><option value="">Todos</option></select>
+      </div>
+      <div class="field">
+        <label for="subFilter">Subagente</label>
+        <input id="subFilter" type="text" list="subList" placeholder="Todos">
+        <datalist id="subList"></datalist>
+      </div>
+      <div class="field">
+        <label>Estado do contacto</label>
+        <div class="estado-chips" id="estadoContatoChips"></div>
+      </div>
+      <button class="btn" id="clearFilters">Limpar filtros</button>
+      <button class="btn primary" id="exportCsv">Exportar ficheiro XLS (filtrado)</button>
+    </div>
+
+    <p class="summary-line"><span class="sync-dot" id="syncDot"></span><span id="summaryLine"></span></p>
+
+    <div id="tableWrap"></div>
+
+    <div class="pager">
+      <div class="info" id="pageInfo"></div>
+      <div class="controls">
+        <button class="btn" id="prevPage">‹ Anterior</button>
+        <button class="btn" id="nextPage">Seguinte ›</button>
+      </div>
+    </div>
+
+    <footer>Painel ligado em direto à Google Sheet. As observações que editares aqui gravam-se diretamente na folha. Os estados são recalculados a cada abertura, com base na data de hoje.</footer>
+
+    <div id="proposalOverlay" class="modal-overlay hidden">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <h2 id="proposalTitle">Proposta</h2>
+          <button class="modal-close" id="proposalCloseBtn" type="button">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="field" style="margin-bottom:14px;">
+            <label for="proposalTemplateSelect">Tarifário a propor</label>
+            <select id="proposalTemplateSelect">
+              <option value="">— escolhe um tarifário —</option>
+            </select>
+          </div>
+          <div id="proposalGridWrap"></div>
+        </div>
+        <div class="modal-footer">
+          <span id="proposalStatus" class="proposal-status"></span>
+          <button class="btn" id="proposalCloseBtn2" type="button">Fechar</button>
+          <button class="btn primary" id="proposalSendBtn" type="button" disabled>Enviar por e-mail ao cliente</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script type="application/json" id="propostas-data">{"M2 adsl_M2 semfios":[["MORADA:","R: FONTE JUNTA FREG OLMOS OLMOS 5340 - 372 PORTUGAL","",""],["Nº DE CONTA:","1414434496","",""],["","","ATUALMENTE","PROPOSTA"],["","","","M2 "],["INTERNET FIXA","","24/","40/4"],["TELEFONE FIXO","","Chamadas incluídas 24h/dia para redes fixas nacionais (números começados por 2) e 1.000 minutos em chamadas para 50 destinos internacionais das 21h às 9h","Chamadas incluídas 24h/dia para redes fixas nacionais (números começados por 2) e 1.000 minutos em chamadas para 50 destinos internacionais das 21h às 9h"],["MENSALIDADE","","30,47 €","22,76 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Desconto mensal de 7,71€ ","","",""],["> Desconto adicional de 3,25€ durante 24 meses ","","",""],["Os produtos e serviços destinam-se ao mercado eB16:E33mpresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M2 sem fios_ M2 200":[["MORADA:","ET: NACIONAL 356 15 OURÉM 2490 - 776 PORTUGAL","",""],["Nº DE CONTA:","1505579286","",""],["","","ATUALMENTE","PROPOSTA"],["","","","M2 "],["INTERNET FIXA","","40/4 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","Chamadas incluídas 24h/dia para redes fixas nacionais (números começados por 2) e 1.000 minutos em chamadas para 50 destinos internacionais das 21h às 9h","Chamadas incluídas 24h/dia para redes fixas nacionais (números começados por 2) e 1.000 minutos em chamadas para 50 destinos internacionais das 21h às 9h"],["MENSALIDADE","","24,06 €","17,99 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Mudança de tecnologia para Fibra 1000/400 Mbps ","","",""],["> Desconto adicional de 3,25€ durante 24 meses ","","",""],["> Decrescimo na mensalidade de 6,07€ / mês ","","",""],["Os produtos e serviços destinam-se ao mercado eB16:E33mpresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M2 sem fios":[["MORADA:","RUA  Pereiro  92  ","",""],["Nº DE CONTA:","1325644265","",""],["","","ATUALMENTE","PROPOSTA"],["","","","M2 "],["INTERNET FIXA","","40/4","40/4"],["TELEFONE FIXO","","Chamadas incluídas 24h/dia para redes fixas nacionais (números começados por 2) e 1.000 minutos em chamadas para 50 destinos internacionais das 21h às 9h","Chamadas incluídas 24h/dia para redes fixas nacionais (números começados por 2) e 1.000 minutos em chamadas para 50 destinos internacionais das 21h às 9h"],["MENSALIDADE","","24,05 €","22,76 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["Os produtos e serviços destinam-se ao mercado eB16:E33mpresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M2_100-200":[["MORADA:","ET: VALE NOGUEIRA 7 COND CANEÇAS 1685 - 552 PORTUGAL","",""],["Nº DE CONTA:","1701685804","",""],["","","ATUALMENTE M2 -100 /100 Mbps","PROPOSTA"],["","","","M2 ( 1000/400 Mbps) "],["INTERNET FIXA","","100/100 Mbps","1000/400"],["TELEFONE FIXO ","","Chamadas a € 0 para todas as redes fixas","Chamadas a € 0 para todas as redes fixas"],["MENSALIDADE","","19,90 €","17,99 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Desconto na mensalidade de 3,25€ durante 24 meses ( já incluido no valor apresentado)","","",""],["> Reduçao mensal no valor de 9,35€","","",""],["Os produtos  e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M2_200-200":[["MORADA:","LU: CASAL DE SANTO ANTÓNIO C PILAR A DOS CUNHADOS 2560 - 050 PORTUGAL","",""],["Nº DE CONTA:","1704634714","",""],["","","TARIFARIO ACTUAL  M2 -(200 /100 Mbps)","TARIFARIO PROPOSTO"],["","","","M2 ( 200/100 Mbps) "],["INTERNET FIXA","","200/100 Mbps","200/100 Mbps"],["TELEFONE FIXO ","","Redes fixas nacionais: chamadas incluídas. Redes internacionais: 1.000 minutos por mês para 50 destinos, entre as 21h e as 9h","Redes fixas nacionais: chamadas incluídas. Redes internacionais: 1.000 minutos por mês para 50 destinos, entre as 21h e as 9h"],["MENSALIDADE","","20,72 €","18,69 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Desconto na mensalidade de 2,44€ durante 24 meses ( já incluido no valor apresentado)","","",""],["> Adicionalmente desconto na mensalidade de €1,63 durante 24 meses","","",""],["Os produtos  e serviços destinam-se ao mercado empresarial. Aos vaLores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da MEO Empresas.","","",""]],"M2_200-1000":[["MORADA:","RUA OCIDENTAL MERCADO 43 LJ 3 - SETUBAL ","",""],["Nº DE CONTA:","1702446185","",""],["","","ATUALMENTE M2 -200 /100 Mbps","PROPOSTA"],["","","","M2 ( 1000/400 Mbps) "],["INTERNET FIXA","","200/100 Mbps","1000/400 Mbps"],["TELEFONE FIXO ","","Chamadas a € 0 para todas as redes fixas","Chamadas a € 0 para todas as redes fixas"],["MENSALIDADE","","27,02 €","17,99 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Desconto na mensalidade durante 24 meses  ( já incluido no valor apresentado)","","",""],["> Aumneto da Net FIXA para 1000/400 Mbps ","","",""],["> Reduçao na mensalidade no valor de 9,03€ ","","",""],["Os produtos  e serviços destinam-se ao mercB16:E32ado empresarial. Aos vaLores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da MEO Empresas.","","",""]],"M2 GIGA":[["MORADA:","AR: D - ZONA INDUSTRIAL GPROMOTIOM ALBERGARIA-A-VELHA 3850 - 184 PORTUGAL","",""],["Nº DE CONTA:","1700436726","",""],["","","ATUALMENTE M2 1000/200 Mbps ","PROPOSTA"],["","","","M2  1000/400 Mbps"],["INTERNET FIXA","","1000/200","1000/400"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["MENSALIDADE","","38,25 €","25,99 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Desconto na mensalidade durante 24 meses ( já incluido no valor apresentado)","","",""],["> Reduçao de 12,26€ por mês na mensalidade ","","",""],["Os produtos e serviços destinam-se ao mercB16:E31ado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Meo Empresas .","","",""]],"M3 sem fios":[["MORADA:","AL: 25 DE ABRIL LJ 2630 ARRUDA DOS VINHOS 2630 - 248 PORTUGAL","",""],["Nº DE CONTA:","541661025","",""],["","","ATUALMENTE M3 sem fios ","PROPOSTA"],["","","","M3 sem fios "],["TELEVISÃO","","90 canais, inclui 72 canais TV e canais de rádio","90 canais, inclui 72 canais TV e canais de rádio"],["INTERNET FIXA","","até 40 Mbps | 4 Mbps ","até 40 Mbps | 4 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["MENSALIDADE","","29,66 €","28,03 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Oferta de um desconto mensal de 3,66€ durante 24 meses","","",""],["> Desconto de € 1,22 na mensalidade (24 meses)","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M3-24-1000":[["MORADA:","R: IGREJA 9009 ALBERGARIA DOS DOZE 3100 - 081 PORTUGAL","",""],["Nº DE CONTA:","1052468571","",""],["","","ATUALMENTE M3 24 Megas","PROPOSTA"],["","","","M3 1000/400 Mbps "],["TELEVISÃO","","150 canais ","150 canais"],["","","1 MEOBox DVR Full HD incluída ","1 MEOBox DVR Full HD incluída"],["INTERNET FIXA","","24 / 2 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["MENSALIDADE","","31,13 €","30,47 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de uma Mensalidade ( valor de oferta sob o pacote base ) ","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Desconto EXTRA de € 2,44 na mensalidade (24 meses)","","",""],["> Desconto de € 1,22 na mensalidade (24 meses)","","",""],["> Oferta Plano Minutos FIXO -Movel 500 minutos (24 meses)","","",""],["> Poupança mensal de 0,66€ ( poupança em 24 meses de 15,84€ ) ","","",""],["Os produto+B16:E37s e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M3-24-500":[["MORADA:","R: MOVIMENTO DAS FORÇAS ARMADAS 22A FOGUETEIRO 2845 - 380 PORTUGAL","",""],["Nº DE CONTA:","1303605144","",""],["","","ATUALMENTE M3 200 Mbps Sport Office ( 3 canais ) ","PROPOSTA"],["","","","M3 500/100 Mbps ( sport  office 3 canais)"],["TELEVISÃO","","150 canais ","150 canais"],["","","1 MEOBox DVR Full HD incluída ","1 MEOBox DVR Full HD incluída"],["INTERNET FIXA","","200/100","500/100 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["MENSALIDADE","","92,31 €","76,81 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de uma Mensalidade ( valor de oferta sob o pacote base ) ","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Desconto EXTRA de € 2,44 na mensalidade (24 meses)","","",""],["> Desconto de € 1,22 na mensalidade (24 meses)","","",""],["> Oferta Plano Minutos FIXO -Movel 500 minutos (24 meses)","","",""],["> Poupança mensal de 15,50€ ( poupança em 24 meses de 372€ ) ","","",""],["Os produto+B16:E37s e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M3-200-1000":[["MORADA:","AV: RIOPELE 946 RT POUSADA DE SARAMAGOS 4770 - 405 PORTUGAL","",""],["Nº DE CONTA:","1703980203","",""],["","","ATUALMENTE M3- 200/100  Mbps","PROPOSTA"],["","","","M3 1000/400 Mbps "],["TELEVISÃO","","150 canais ","150 canais"],["","","1 MEOBox incluída  ","1 MEOBox incluída"],["INTERNET FIXA","","200/100 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) + Oferta Plano Minutos Fixo-Movel 200 minutos "],["MENSALIDADE","","40,08 €","28,70 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Reduçao na mensalidade de 11,38€ / Mês","","",""],["> Oferta Plano Minutos FIXO - Movel 200 minutos (24 meses)","","",""],["Os produtos  e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da MEO Empresas.","","",""]],"M3-200-500":[["MORADA:","R: CARAVELAS 3A ARMAÇÃO DE PÊRA 8365 - 116 PORTUGAL","",""],["Nº DE CONTA:","1486746375","",""],["","","ATUALMENTE M3 200/100  Mbps ","PROPOSTA"],["","","","M3 500/100 Mbps "],["TELEVISÃO","","150 canais ","150 canais"],["","","1 MEOBox DVR Full HD incluída ","1 MEOBox DVR Full HD incluída"],["INTERNET FIXA","","200/100 Mbps","500/100 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["MENSALIDADE","","36,90 €","28,03 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Desconto EXTRA de € 1,63 na mensalidade (24 meses)","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Desconto EXTRA de € 2,44 na mensalidade (24 meses)","","",""],["> Desconto de € 1,22 na mensalidade (24 meses)","","",""],["> Oferta Plano Minutos FIXO -Movel 500 minutos (24 meses)","","",""],["> Poupança mensal de  8,87 € ( poupança em 24 meses de 212,88€ ) ","","",""],["Os produtos  e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M3_200-500":[["MORADA:","R: MIGUEL BOMBARDA 209 B BARREIRO 2830 - 289 PORTUGAL","",""],["Nº DE CONTA:","1409403964","",""],["","","ATUALMENTE M3 200/100","PROPOSTA"],["","","","M3 500 /100 Mbps"],["TELEVISÃO","","150 canais","150 canais"],["","","1 MEOBox  incluída","1 MEOBox incluída"],["INTERNET FIXA","","200/100 Mpbs","500/100 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["MENSALIDADE","","32,43 €","29,25 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Desconto EXTRA de € 3,66 na mensalidade (24 meses)","","",""],["> Desconto de € 1,63 na mensalidade (24 meses)","","",""],["> Oferta de um plano Fixo-Móvel de 500 minutos durante 24 meses","","",""],["> Poupança mensal de  3,18€ ( poupança em 24 meses de 76,32€ ) ","","",""],["Os produto+B16:E37s e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M3-500-1000":[["MORADA:","PC: JOAQUIM ANTONIO AGUIAR 12 ED B 1 N ÉVORA 7000 - 510 PORTUGAL","",""],["Nº DE CONTA:","1701758363","",""],["","","TARIFARIO ATUAL  M3 500/100 Mbps","TARIFARIO PROPOSTO"],["","","","M3 1000 /400 Mbps"],["TELEVISÃO","","150 canais + Meo Box Incluida ","150 canais + Meo Box Incluida "],["INTERNET FIXA","","500/100 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) +  Oferta Plano Minutos Fixo-Movel 1000 minutos "],["MENSALIDADE","","34,94 €","30,47 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["( descontos já incluidos na mensalidade acima apresentada ) ","","",""],["> Oferta da MEO BOX ( 24 meses) ","","",""],["> Reduçao na mensalidade de 4,47€/ Mês","","",""],["Os pr+B16:+B16:E35E35odutos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da MEO Empresas.","","",""]],"M3_500-500":[["MORADA:","R: FEBO MONIZ LT 2694 RC QUINTA DO CONDE 2975 - 370 PORTUGAL","",""],["Nº DE CONTA:","1442346367","",""],["","","ATUALMENTE  M3 500/100","PROPOSTA"],["","","","M3 500 /100 Mbps"],["TELEVISÃO","","150 canais","150 canais"],["","","1 MEOBox DVR Full HD incluída","1 MEOBox DVR Full HD incluída"],["INTERNET FIXA","","500/100 Mpbs","500/100 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["MENSALIDADE","","39,59 €","28,03 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de um desconto mensal de 1,63€ durante 24 meses","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Desconto EXTRA de € 2,44 na mensalidade (24 meses)","","",""],["> Desconto de € 1,22 na mensalidade (24 meses)","","",""],["> Oferta Plano Minutos FIXO -Movel 500 minutos (24 meses)","","",""],["> Poupança mensal de 11,56€ ( poupança em 24 meses de 277,44€)","","",""],["Os produtos  e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M3-1000-1000":[["MORADA:","R: 25 ABRIL 7 1 VIALONGA 2625 - 624 PORTUGAL","",""],["Nº DE CONTA:","1703702543","",""],["","","ATUALMENTE M3 1000/400 Mbps","PROPOSTA M3 1000/400 Mbps"],["TELEVISÃO","","150 canais","150 canais"],["","","1 MEOBox  incluída ","1 MEOBox incluída"],["INTERNET FIXA","","1000/400 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h ) + Oferta de um plano Fixo-Móvel de 1000 minutos durante 24 meses"],["MENSALIDADE","","44,96 €","28,70 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da 1ª MEOBox DVR Full HD (24 meses)","","",""],["> Oferta de um Plano de Minutos Fixo -Movel 1000 minutos ","","",""],["> Reduçao na mensalidade de 16,26€ / Mês","","",""],["Os produtos  e serviços destinam-sB15:E36e ao mercad+B16:E36o empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Meo Empresas.","","",""]],"M3_1000so-1000 Sp":[["MORADA:","R: ESSES 99 BREJOS DE AZEITÃO 2925 - 792 PORTUGAL","",""],["Nº DE CONTA:","1701510873","",""],["","","ATUALMENTE  M3 1000/400 ( Sport office 3 canais Desportivos) + Pack Extra Canais Tv Cine","PROPOSTA  M3 1000/400 ( Sport office 3 canais Desportivos) + Pack Extra Canais Tv Cine"],["TELEVISÃO","","150 canais","150 canais"],["","","1 MEOBox ","1 MEOBox  "],["INTERNET FIXA","","1000/400 Mpbs","1000/400 Mpbs"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)+  Oferta de um plano Fixo-Móvel de 1000 minutos durante 24 meses"],["MENSALIDADE","","119,18 €","96,72 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Desconto de 1,63€ na mensalidade ( 24 meses ) ","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Desconto EXTRA de € 2,44 na mensalidade (24 meses)","","",""],["> Desconto de € 1,22 na mensalidade (24 meses)","","",""],["> Oferta Plano Minutos FIXO -Movel 1000 minutos (24 meses)","","",""],["Os produto+B16:E37s e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Meo Empresas.","","",""]],"M3 (2)":[["MORADA:","PC: ALCANTARA LT 10 4 D FUNDÃO 6230 - 498 PORTUGAL","",""],["Nº DE CONTA:","1445946709","",""],["","","ATUALMENTE M3- 30/10 Mbps","PROPOSTA"],["","","","M3 500 / 500 Mbps"],["TELEVISÃO","","150 canais","150 canais"],["INTERNET FIXA","","30/10 Mbps","500/100 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) + 500 "],["","","","minutos para redes moveis "],["MENSALIDADE","","28,61 €","28,03 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de um desconto mensal de 1,63€ durante 24 meses","","",""],["> Oferta de um desconto mensal de 2,44€ durante 24 meses","","",""],["> Oferta de um desconto mensal de 1,22€ durante 24 meses","","",""],["> Oferta da MEO BOX ( 24 meses)","","",""],["> Oferta de um plano Fixo-Móvel de 500 minutos durante 24 meses ","","",""],["Os produto+B16:E37B16:E37B16:E37s e serviços destinam-se ao mercado empresariaB16:E36l. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M3Onet_M2 com movel":[["MORADA:","R PRINCIPAL 60","",""],["Nº DE CONTA:","1701733077","",""],["","","ATUALMENTE  M3O_Net _ 3 telemoveis ","PROPOSTA"],["","","","M2_3 Telemoveis "],["TELEVISÃO","","Na ","Na "],["INTERNET FIXA","","100/100 Mbps","1000/400 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["TELEMOVEIS ","","3 Cartões com 3500 minutos + 3500 Sms +1 GB ","3 cartão com 3.500 minutos, 3.500 SMS, 200GB"],["MENSALIDADE","","50,40 €","48,77 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Poupança mensal de 1,63€ ( poupança em 24 meses de 39,12€)","","",""],["Os produtos  e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M4_200_1000":[["MORADA:","RUA CIDADE DA RIBEIRA GRANDE 5 - PONTA DELGADA","",""],["Nº DE CONTA:","1202176883","",""],["","","ATUALMENTE M4_200/100 Mbps 10GB  ","PROPOSTA"],["","","","M4_1000/400 Mbps _200 GB FLASH"],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox Incluida ","1 MEOBox DVR Full HD incluída "],["INTERNET FIXA","","200/100 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) + Oferta de um plano Fixo-Móvel de 1000 minutos durante 24 meses"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["1 (CARTÃO)","dados móveis","10GB/cartão","200 GB/ cartao "],["Adicionais ","","",""],["MENSALIDADE FINAL","","51,06 €","39,01 €"],["> Aumento dos dados moveis para 200GB nos cartões e aumento da Net fixa para 1000/400Mbps","","",""],["> Oferta do aluguer da 1ª MEOBox DVR Full HD (24 meses)","","",""],["> Reduçao na mensalidade em 13,23€ mês","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_200_500":[["MORADA:","ET MONTE DO JOÃO TERESA VIV CARLOS - VILA NOVA DA CACELA ","",""],["Nº DE CONTA:","146 571 46 41","",""],["","","ATUALMENTE M4  200/100 Mbps 10GB  ","PROPOSTA"],["","","","M4_500/100 Mbps _200 GB "],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox Incluida + 2ª BOX ","1 MEOBox DVR Full HD incluída + 2ª BOX"],["INTERNET FIXA","","200/100 Mbps","500/100 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTÃO)","dados móveis","10 GB/cartão","200 GB/ cartao "],["Adicionais ","","",""],["MENSALIDADE FINAL","","66,20 €","50,53 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],[">  Oferta de um desconto mensal de 3,66€ durante 24 meses ","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Desconto de € 4,88 na mensalidade (24 meses)","","",""],[">  Oferta de um desconto mensal de 2,03€ durante 24 meses ","","",""],[">  Oferta de um desconto de 25% nos cartões adicionais durante 24 meses ","","",""],["> Poupança mensal de 15,67€ ( poupança em 24 meses de 376,08 ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_adsl_1000":[["MORADA:","ET: NACIONAL 247 19 ALTO FÉLIX 2530 - 731 PORTUGAL","",""],["Nº DE CONTA:","1506225121","",""],["","","ATUALMENTE M4 ADSL 10GB","PROPOSTA"],["","","","M4 1000/400_200 GB"],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox","1 MEOBox DVR Full HD incluída"],["INTERNET FIXA","","24/1 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) + Oferta de um plano Fixo-Móvel de 1000 minutos durante 24 meses"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(3 CARTÕES)","dados móveis","10 GB/cartão","200 GB/ cartão"],["MENSALIDADE FINAL","","76,20 €","59,34 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Oferta de um plano Fixo-Móvel de 1000 minutos durante 24 meses","","",""],["> Desconto de € 1,22 na mensalidade (24 meses)","","",""],["> Desconto de € 4,88 na mensalidade (24 meses)","","",""],["> Poupança mensal de 6,90€ ( poupança em 24 meses de 165,60€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_adsl_M4 SO":[["MORADA:","R DAVID MOREIRA COSTA 1","",""],["Nº DE CONTA:","134 169 15 43","",""],["","","ATUALMENTE M4 Satelite 10GB","PROPOSTA"],["","","","M4 Sport Office 200 GB ( 2 canais ) "],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox + 2ª BOX ","1 MEOBox DVR Full HD incluída + 2ª BOX "],["INTERNET FIXA","","40/4","1000/400 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(1 CARTÕES)","dados móveis","10 GB/cartão","200 GB/ cartão"],["MENSALIDADE FINAL","","89,31 €","71,78 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Desconto de € 2,03 na mensalidade (24 meses)","","",""],["> Desconto de € 3,66 na mensalidade (24 meses)","","",""],["> Desconto de € 4,88 na mensalidade (24 meses)","","",""],["> Poupança mensal de 17,53€ ( poupança em 24 meses de 420,72€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_adsl_adsl":[["MORADA:","PC: FRANCISCO GONÇALVES PEREIRA 15 PEROGUARDA 7900 - 455 PORTUGAL","",""],["Nº DE CONTA:","1506496733","",""],["","","ATUALMENTE M4 ADSL 1GB","PROPOSTA"],["","","","M4 ADSL_200 GB"],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox","1 MEOBox DVR Full HD incluída"],["INTERNET FIXA","","2026-01-24 00:00:00","2026-01-24 00:00:00"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(3 CARTÕES)","dados móveis","1 GB/cartão","200 GB/ cartão"],["MENSALIDADE FINAL","","",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],[">  Oferta  de uma mensalidade 39,02€ ","","",""],["> Desconto de € 1,22 na mensalidade (24 meses)","","",""],["> Desconto de € 4,88 na mensalidade (24 meses)","","",""],["> Poupança mensal de 21,30€ ( poupança em 24 meses de 511,20€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_sf_sf":[["MORADA:","R: COMERCIO SN MENDARES 6000 - 696 PORTUGAL","",""],["Nº DE CONTA:","541667197","",""],["","","ATUALMENTE M4 Satelite 10GB","PROPOSTA"],["","","","M4 Satelite_200 GB"],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox","1 MEOBox DVR Full HD incluída"],["INTERNET FIXA","","40/4","40/4"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTÕES)","dados móveis","10 GB/cartão","200 GB/ cartão"],["MENSALIDADE FINAL","","52,83 €","47,15 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],[">  Oferta  de uma mensalidade 39,02€ ","","",""],["> Desconto de € 1,22 na mensalidade (24 meses)","","",""],["> Desconto de € 4,88 na mensalidade (24 meses)","","",""],["> Poupança mensal de 5,68€ ( poupança em 24 meses de 136,32€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_500-500":[["MORADA:","R: GAGO COUTINHO 2685 RC LJ A QUINTA DO CONDE 2975 - 375 PORTUGAL","",""],["Nº DE CONTA:","1459246366","",""],["","","ATUALMENTE M4 500/100 10 GB","PROPOSTA"],["","","","M4 500/100 _200 GB"],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox","1 MEOBox DVR Full HD incluída"],["INTERNET FIXA","","500/100 Mbps","500/100 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTÕES)","dados móveis","10 GB/cartão","200 GB/ cartao "],["MENSALIDADE FINAL","","60,87 €","50,53 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de um plano Fixo-Móvel de 500 minutos durante 24 meses","","",""],["> Oferta de um desconto mensal de 2,03€ durante 24 meses","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Oferta de um desconto mensal de 3,66€ durante 24 meses ","","",""],["> Oferta de 25% da mensalidade no 2º cartão durante 24 meses> ","","",""],["> Oferta de um desconto mensal de 4,88€ durante 24 meses","","",""],["> Poupança mensal de 10,34€ ( poupança em 24 meses de 248,16€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_500so_1000 so (2)":[["MORADA:","","",""],["Nº DE CONTA:","","",""],["","","ATUALMENTE M4 500/100 10GB + 1 Canal desportivo ","Proposto M4 1000/400 200GB + 1  Canal desportivo "],["TELEVISÃO","","200 canais + Sport Tv ","200 canais + Sport Tv "],["","","1 MEOBox incluída ","1 MEOBox incluída "],["INTERNET FIXA","","1000/200 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) + 1000 Minutos de Fixo para Movel "],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTÕES)","dados móveis","30 GB/cartão","200GB"],["MENSALIDADE FINAL","","137,83 €","109,17 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Poupança mensal de 6,50€ ( poupança em 24 meses de 156€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_200_1000 SO":[["MORADA:","ET: PRINCIPAL 1245 CASAL NOVO 2490 - 066 PORTUGAL","",""],["Nº DE CONTA:","1704678633","",""],["","","ATUALMENTE M4  200/100 Mbps 10GB  ","PROPOSTA"],["","","","M4_1000/400 Mbps _200 GB  -FLASH"],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox Incluida ","1 MEOBox incluída "],["INTERNET FIXA","","200/100 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) + 1000 Minutos de Fixo para Telemovel"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["2( CARTÃO)","dados móveis","20GB/cartão","200 GB/ cartao "],["Adicionais ","","",""],["MENSALIDADE FINAL","","53,77 €","47,14 €"],[">  Oferta de um desconto mensal de 3,66€ durante 24 meses ","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Oferta de UMA mensalidade no valor de 39,01€","","",""],[">  Oferta de um desconto mensal de 2,03€ durante 24 meses ","","",""],["> Poupança mensal = 6,63€ ( poupança em 24 meses = 120€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_500-1000":[["","","1704478141 ",""],["MORADA:","R: CIRCULAR INTERMÉDIA 9 ÉVORA 7005 - 513 PORTUGAL","",""],["Nº DE CONTA:","1700357533","",""],["","","ATUALMENTE M4 TOP 500/100 10GB ","PROPOSTA"],["","","","M4 1000/400 _200 GB - FLASH"],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox incluida ","1 MEOBox DVR Full HD incluída"],["INTERNET FIXA","","500/100 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["( 1 CARTÕES)","dados móveis","10 GB/cartão","200 GB"],["MENSALIDADE FINAL","","52,72 €","39,01 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Oferta de UMA mensalidade no valor de 39,02€","","",""],["> Poupança mensal de 13,71€ ( poupança em 24 meses de 329,04€  ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_1000_1000":[["MORADA:","CM: CARVALHO CERQUINHO 1 LARANJEIRAS 3250 - 151 PORTUGAL","",""],["Nº DE CONTA:","1702340440","",""],["","","ATUALMENTE M4 1000/200 _10GB","PROPOSTA   M4 1000/400_200GB FLASH"],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox incluída ","1 MEOBox incluída "],["INTERNET FIXA","","1000/200 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) "],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(1 CARTÃO)","dados móveis","10 GB","200GB"],["MENSALIDADE FINAL","","42,49 €","39,01 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Aumento dos dados moveis para 200GB cada cartão","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Poupança mensal de 3,49€ ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"SO_M4_sfios_M4_sfio":[["MORADA:","SI: PERAL Cafe Tumba PERAL 8150 - 052 PORTUGAL","",""],["Nº DE CONTA:","1506656569","",""],["","","ATUALMENTE Sport Office 4 _24/4 Mbps + 3  Canais desportivos ","Proposta : Sport Office 4 _40/4 Mbps + 3  Canais desportivos "],["TELEVISÃO","","200 canais + Btv + Sport Tv + Dazn","200 canais + Btv + Sport Tv + Dazn"],["","","1 MEOBox incluída + 2ª Box ","1 MEOBox incluída + 2ª Box "],["INTERNET FIXA","","24/4 Mbps ","40/4 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) "],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(1 CARTÕES)","dados móveis","10 GB/cartão","200GB"],["MENSALIDADE FINAL","","99,00 €","88,85 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Poupança mensal de 10,15€ ( poupança em 24 meses de 243,6€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_1000i_1000i":[["MORADA:","R: ALM CANDIDO REIS 22 TAVIRA 8800 - 318 PORTUGAL","",""],["Nº DE CONTA:","1701863440","",""],["","","ATUALMENTE M4 1000/400 _Ilimitado","PROPOSTA   M4 1000/400_Ilimitado"],["TELEVISÃO","","200 canais","200 canais"],["","","1 MEOBox incluída ","1 MEOBox incluída "],["INTERNET FIXA","","1000/400 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) + Oferta de um plano Fixo-Móvel de 1000 minutos durante 24 meses"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTÃO)","dados móveis","ILIMITADO","ILIMITADO"],["MENSALIDADE FINAL","","82,63 €","53,78 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Poupança mensal de 28,85€ ( poupança em 24 meses de 692,40€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_1000so_1000 so":[["MORADA:","ET: DA SENHORA DA SAÚDE 104 RC FARO 8005 - 493 PORTUGAL","",""],["Nº DE CONTA:","1704295091","",""],["","","ATUALMENTE M4 500/100 10GB + 3 Canais desportivos","Proposto M4 1000/400 200GB + 3  Canais desportivos"],["TELEVISÃO","","200 canais + Sport Tv + Btv + DAZN ","200 canais + Sport Tv + Btv + DAZN "],["","","1 MEOBox incluída ","1 MEOBox incluída "],["INTERNET FIXA","","500/100  Mbps","1000/400 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) + 1000 Minutos de Fixo para Movel "],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTÕES)","dados móveis","30 GB/cartão","200GB"],["MENSALIDADE FINAL","","108,61 €","100,36 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["Aumento da Net fixa para 1000/400 Mbps ","","",""],["> Poupança mensal de 7,64€ ( poupança em 24 meses de 183,36€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M5_giga_M4 1000":[["MORADA:","","",""],["Nº DE CONTA:","","",""],["","","TARIFARIO ATUAL ","TARIFARIO PROPOSTO"],["","","M5 GIGA 1000/200_10GB","M4 GIGA 1000/400 _200GB"],["TELEVISÃO","","200 canais","200 canais"],["","","MEOBox incluida"," MEOBox Incluida"],["","","MEO Go em todo o lado incluído","MEO Go em todo o lado incluído"],["INTERNET FIXA","","1000/200 Mbps ","1000/400 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)"],["","",""," + 1000 min. redes móveis nacionais"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(1 CARTOES)","dados móveis","10GB","200GB"],["INTERNET MÓVEL","","60GB","ILIMITADO"],["MENSALIDADE FINAL","","",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Poupança Mensal de 12,11€ ( poupança nos 24 meses de 291,84€ ) ","","",""],["> Oferta do aluguer de uma das  MEOBox DVR Full HD (24 meses)","","",""],["> Oferta do Plano Fixo-Móvel 1000 min. (24 meses)","","",""],["> Desconto de € 6,10 na mensalidade (24 meses)","","",""],["> Desconto de € 3,66 na mensalidade (24 meses)","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://porB19:E43tfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M4_gcp_1000 (2)":[["MORADA:","RUA DO CASTELO 1 ","",""],["Nº DE CONTA:","1388956505","",""],["","","ATUALMENTE GCP ","PROPOSTA"],["","","","M4 1000/400 _200 GB"],["TELEVISÃO","","nA","200 canais"],["","","","1 MEOBox incluída "],["INTERNET FIXA","","250/50 Mbps","1000/400 Mbps"],["TELEFONE FIXO","","1 x Utilizadores FIXOS a €0 para redes fixas e móveis nacionais e 50 destinos internacionais","€ 0 redes fixas nacionais + 50 destinos internacionais fixos (21-9h) + 1000 Minutos de Fixo para Movel "],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(3 CARTÕES)","dados móveis","5 GB/cartão","200 GB/ cartao "],["MENSALIDADE FINAL","","108,03 €","62,59 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de um desconto mensal de 2,03€ durante 24 meses","","",""],["> Oferta do aluguer da MEOBox DVR Full HD (24 meses)","","",""],["> Oferta de um desconto mensal de 3,66€ durante 24 meses","","",""],["> Oferta de um plano Fixo-Móvel de 1000 minutos durante 24 meses","","",""],["> Poupança mensal de 45,44€ ( poupança em 24 meses de 1090,56€ ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M5_500_giga":[["MORADA:","","",""],["Nº DE CONTA:","1703924840","",""],["","","ATUALMENTE  ","PROPOSTA"],["","","M5 START 500/100 ","M5  1000/400"],["TELEVISÃO","","200 canais","200 canais"],["","","MEOBox incluida"," MEOBox Incluida"],["INTERNET FIXA","","500/100 Mbps ","1000/400 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)"],["","",""," + 1000 min. redes móveis nacionais"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTOES)","dados móveis","30 GB/cartão","200 GB/cartão "],["INTERNET MÓVEL","","15GB","Ilimitado "],["MENSALIDADE FINAL","","62,69 €","57,03 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Poupança Mensal de 5,66€ ( poupança nos 24 meses de 135,84€ ) ","","",""],["> Oferta do aluguer de uma das  MEOBox DVR Full HD (24 meses)","","",""],["> Oferta do Plano Fixo-Móvel 1000 min. (24 meses)","","",""],["> Descontos na mensalidade (24 meses)","","",""],[">  Oferta de um desconto de 25% no 2º cartão durante 24 meses","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M5_500_giga (2)":[["MORADA:","","",""],["Nº DE CONTA:","","",""],["","","ATUALMENTE  ","PROPOSTA"],["","","M5 Start 500/100 ","M5 GIGA 1000/400 "],["TELEVISÃO","","200 canais","200 canais"],["","","MEOBox incluida"," MEOBox Incluida"],["","","","MEO Go em todo o lado incluído"],["INTERNET FIXA","","500/100 Mbps ","1000/400 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)"],["","",""," + 1000 min. redes móveis nacionais"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(4 CARTOES)","dados móveis","40 GB/cartão","200 GB/cartão "],["INTERNET MÓVEL","","60GB","ILIMITADO"],["MENSALIDADE FINAL","","",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Poupança Mensal de 3,18€ ( poupança nos 24 meses de 76,32€ ) ","","",""],["> Oferta do aluguer de uma das  MEOBox DVR Full HD (24 meses)","","",""],["> Oferta do Plano Fixo-Móvel 1000 min. (24 meses)","","",""],["> Desconto de € 6,10 na mensalidade (24 meses)","","",""],["> Desconto de € 3,66 na mensalidade (24 meses)","","",""],[">  Oferta de um desconto de 25% no 2º cartão durante 24 meses","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M5_BU_BU":[["MORADA:","R: REPÚBLICA 211 RC FIGUEIRA DA FOZ 3080 - 036 PORTUGAL","",""],["Nº DE CONTA:","1702479091","",""],["","","TARIFARIO ATUAL ","TARIFARIO PROPOSTO"],["","","BU GIGA 1000/400 ","BU GIGA 1000/400 "],["TELEVISÃO","","200 canais","200 canais"],["","","MEOBox incluida"," MEOBox Incluida"],["","","MEO Go em todo o lado incluído","MEO Go em todo o lado incluído"],["INTERNET FIXA","","1000/400 Mbps ","1000/400 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTOES)","dados móveis","10 GB/cartão","200 GB/cartão "],["INTERNET MÓVEL","","60GB","ILIMITADO"],["MENSALIDADE FINAL","","91,81 €","77,46 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Poupança Mensal de 14,35€ ( poupança nos 24 meses de 344,40€ ) ","","",""],["> Oferta do aluguer de uma das  MEOBox DVR Full HD (24 meses)","","",""],["> Desconto de € 6,10 na mensalidade (24 meses)","","",""],["> Desconto de € 3,66 na mensalidade (24 meses)","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M5_adsl_adsl":[["MORADA:","LG: FONTES PEREIRA MELO 45 CUNHEIRA 7440 - 251 PORTUGAL","",""],["Nº DE CONTA:","1506448740","",""],["","","ATUALMENTE  ","PROPOSTA"],["","","M5 START 24/24 Mbps_10GB","M5  24/24 Mbps_200GB"],["TELEVISÃO","","200 canais","200 canais"],["","","MEOBox incluida"," MEOBox Incluida"],["INTERNET FIXA","","24/24 Mbps","24/24 Mbps"],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)"],["","",""," + 1000 min. redes móveis nacionais"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTOES)","dados móveis","20 GB/cartão","200 GB/cartão "],["INTERNET MÓVEL","","15GB","Ilimitado "],["MENSALIDADE FINAL","","64,30 €","55,40 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Poupança Mensal de 8,90€ ( poupança nos 24 meses de 213,60€ ) ","","",""],["> Oferta do aluguer de uma das  MEOBox DVR Full HD (24 meses)","","",""],["> Oferta do Plano Fixo-Móvel 1000 min. (24 meses)","","",""],[">  Oferta de um desconto de 25% no 2º cartão durante 24 meses","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M5_sat_giga":[["MORADA:","R: DR MANUEL RIBEIRO FERREIRA 4 RC D ALVAIÁZERE 3250 - 113 PORTUGAL","",""],["Nº DE CONTA:","1505057823","",""],["","","TARIFARIO ATUAL ","TARIFARIO PROPOSTO"],["","","M5  Satelite _10GB","M5 GIGA 1000/400 _200GB"],["TELEVISÃO","","200 canais","200 canais"],["","","MEOBox incluida"," MEOBox Incluida"],["","","MEO Go em todo o lado incluído","MEO Go em todo o lado incluído"],["INTERNET FIXA","","40/10 Mbps","1000/400 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)"],["","",""," + 1000 min. redes móveis nacionais"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(4 CARTOES)","dados móveis","40GB","200GB"],["INTERNET MÓVEL","","60GB","ILIMITADO"],["MENSALIDADE FINAL","","92,34 €","70,71 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Poupança Mensal de 21,63€ ( poupança nos 24 meses de 519,12€ ) ","","",""],["> Oferta do aluguer de uma das  MEOBox DVR Full HD (24 meses)","","",""],["> Oferta do Plano Fixo-Móvel 1000 min. (24 meses)","","",""],["> Desconto de € 6,10 na mensalidade (24 meses)","","",""],["> Desconto de € 3,66 na mensalidade (24 meses)","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://porB19:E43tfolio.meoempresas.pt/catalogo-de-equipamen+B21:E43tos1/",""]],"M5 SO":[["MORADA:","AV CD MARGARIDE 175","",""],["Nº DE CONTA:","1701027334","",""],["","","ATUALMENTE  ","PROPOSTA"],["","","Sport Office 5 - 3 canais - 2 cartoes","Sport Office 5 - 3 canais - 2 cartoes"],["TELEVISÃO","","200 canais","200 canais"],["",""," MEOBox"," Meo BOX "],["","","MEO Go Multi","MEO Go Multi"],["INTERNET FIXA","","1000/400 Mbps ","1000/400 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)"],["","",""," + 1000 min. redes móveis nacionais"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTÕES)","dados móveis","120 GB/cartão","200 GB/cartão"],["INTERNET MÓVEL","","60GB","Ilimitado "],["MENSALIDADE FINAL","","130,23 €","96,30€ + 2,43€ ( 2ª box ) "],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Poupança Mensali de 31,50€ ( poupança nos 24 meses de 756€ ) ","","",""],["> Oferta do aluguer de uma das  MEOBox DVR Full HD (24 meses)","","",""],["> Oferta do Plano Fixo-Móvel 1000 min. (24 meses)","","",""],["> Descontos na mensalidade (24 meses)","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"M5_giga_giga":[["MORADA:","AVENIDA JOAO XXI 27 4 - LISBOA","",""],["Nº DE CONTA:","1700742670","",""],["","","TARIFARIO ATUAL ","TARIFARIO PROPOSTO"],["","","M5 GIGA 1000/200_10GB","M5 GIGA 1000/400 _ILIMITADO - FLASH"],["TELEVISÃO","","200 canais","200 canais"],["","","MEOBox incluida"," MEOBox Incluida"],["","","MEO Go em todo o lado incluído","MEO Go em todo o lado incluído"],["INTERNET FIXA","","1000/200 Mbps ","1000/400 Mbps "],["TELEFONE FIXO","","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)","€ 0 redes fixas nacionais + 50 destinos internacionais fixas (21-9h)"],["TELEMÓVEIS","comunicações","3500 min. + 3500 SMS redes nacionais","3500 min. + 3500 SMS redes nacionais"],["(2 CARTOES)","dados móveis","10GB","ILIMITADOS"],["INTERNET MÓVEL","","60GB","ILIMITADO"],["MENSALIDADE FINAL","","87,74 €","52,83 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Poupança Mensal de 34,91€ ( poupança nos 24 meses de 837,84€ ) ","","",""],["> Oferta do aluguer de uma das  MEOBox DVR Full HD (24 meses)","","",""],["> Oferta De uma mensalidade no valor de 39,03€ ","","",""],["> Desconto na mensalidade (24 meses)","","",""],[">Cartoes Moves passa a  ter dados ILIMITADOS ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://porB19:E43tfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"Gcp (8)":[["MORADA:","R CIDADE PAU LJ 10","","","",""],["INSTALAÇAO ","","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA","",""],["","","","Global Connect Pack ","",""],["TELEVISÃO + BOX ","","nA","nA","TELEVISÃO + BOX ",""],["INTERNET FIXA","","250/50 Mbps ","250/50 Mbps ","INTERNET FIXA",""],["1 x UTILIZADOR FIXO ",""," € 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","1000 min. para redes fixas e móveis nacionais","1 x UTILIZADOR FIXOS FIT",""],["TELEMOVEIS ","5 UTILIZADORES FIXOS -  MOVEIS REGULAR","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + € 0 para redes fixas e móveis nacionais e roaming zona1 +  10GB válidos em Portugal e em roaming zona 1 "," 1000 min. para redes fixas e móveis nacionais + € 0 para redes fixas e móveis nacionais e roaming zona1 +  50GB válidos em Portugal e em roaming zona 1 ","5 UTILIZADORES FIXOS FIT -  MOVEIS REGULAR","TELEMOVEIS "],["","Operadora ","1","1","",""],["","Mobility","","","","Mobility"],["","Base","5","5","","Base"],["","Operadora ","1","1","",""],["","Executive","","","","Sites "],["","Moradas","1","1","","Extras"],["","Extras ","14,56 €","0,00 €","",""],["MENSALIDADE FINAL","","214,55 €","153,00 €","",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],["> Aumento do desconto sob a mensalidade para  25 % , atualmente tem 10%","","","","",""],["> +  Internet Movel nos telemoveis ( Cartoes REGULARES  passam a ter 50 GB de dados  )","","","","",""],["> Oferta de 400€ + iva par aquisçao de equipamentos ","","","","",""],["> Reduçao na mensalidade no valor de 61,55€/Mês","","","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/","","",""]],"Gcp (3)":[["MORADA:","R FONTE FETAIS 4","","","",""],["Nº DE CONTA:","1427305928","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA Global Connect Pack ","",""],["TELEVISÃO ","","nA","nA","TELEVISÃO ",""],["INTERNET FIXA","","250/50 Mbps ","250/50 Mbps ","INTERNET FIXA",""],["1 x UTILIZADOR FIXO + 2 UTILIZADORES FIXO LIGHT + 1 UTILIZADOR FIXO FIT","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + Ilimitado para redes fixas e móveis nacionais entre colaboradores + 1000 min. para redes fixas e móveis nacionais ","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + Ilimitado para redes fixas e móveis nacionais entre colaboradores + 1000 min. para redes fixas e móveis nacionais ","1 x UTILIZADOR FIXO + 2 UTILIZADORES FIXO LIGHT + 1 UTILIZADOR FIXO FIT",""],["TELEMÓVEIS ( 4 cartões )","1 x MOVEL REGULAR ","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 10GB válidos em Portugal e em roaming zona 1 ","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 50GB válidos em Portugal e em roaming zona 1 ","TELEMÓVEIS ( 4 cartões )","1 x MOVEL REGULAR "],["","2 x MOVEL ULTRA ","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + 100 GB em Portugal e PUR em roaming zona 1 ","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1  + Ilimitado em Portugal e PUR em roaming zona 1","","2 x MOVEL ULTRA "],["","1 X MOVEL LIGHT ","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +  500 MG nacionais e em roaming zona1(","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +  4GB nacionais e em roaming zona1(","","1 X MOVEL LIGHT "],["EQUIPAMENTOS ","BASE","1","1","EQUIPAMENTOS ","BASE"],["","MOBILITY","3","3","","MOBILITY"],["","Site ","2","2","","Site "],["EXTRAS ","","","","EXTRAS ",""],["MENSALIDADE FINAL","","144,06 €","129,36 €","MENSALIDADE FINAL",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],[">  Mensalidade 129,36€ + iva ","","","","",""],[">Manutençao do Desconto  de 20% sob a mensalidade ","","","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( cartão REGULAR passa a ter 100GB e os ULTRAS passam a  ILIMITADOS  e o LIGHT passa a  4GB ) ","","","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","","","",""],["Catálogo de equipamentos:","","","","",""]],"Gcp":[["MORADA:","R CHAO FEIRA 23 COND","",""],["Nº DE CONTA:","1398074061","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA"],["","","","Global Connect Pack "],["TELEVISÃO","","nA","nA"],["INTERNET FIXA","","1000/400 Mbps","1000/400 Mbps"],["9 x Utilizadores FIXO FIT","","1000 min. para redes fixas e móveis nacionais","1000 min. para redes fixas e móveis nacionais"],["TELEMÓVEIS","2-Movel Light","2 x  Utilizadores Movel  Light - 2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 (3)","2 x  Utilizadores Movel  Light - 2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 (3)"],["Dados Moveis ","dados móveis LIGHT ","500 Megas nacionais e em roaming zona 1","2 GB nacionais e em roaming zona1(6)"],["EQUIPAMENTOS ","Base","9","9"],["Outros Serv","","83,56 €","83,56 €"],["Nº de Sites ","1","1","1"],["Desconto Atual ","","10%","25%"],["MENSALIDADE FINAL","","258,69 €","217,48 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Aumento do desconto para  25% sob a mensalidade ","","",""],["> Aumento dos dados Moveis para 2 GB por cartão","","",""],["> Reduçao na mensalidade em 41,21€ por Mês","","",""],["> Atribuiçao de Plafond para aquisiçao de equipamentos  ( 80€ + IVA ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"Gcp (2)":[["MORADA:","RUA FRANCISCO LEMOS 1","","","",""],["Nº DE CONTA:","1438414356","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA Global Connect Pack","",""],["TELEVISÃO ","","nA","nA","TELEVISÃO ",""],["INTERNET FIXA","","250/50 Mbps","250/50 Mbps ","INTERNET FIXA",""],["3 Utilizadores FIXOS ","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","1000 Minutos  para redes fixas e móveis nacionais","3 Utilizadores FIXOS FIT",""],["TELEMÓVEIS","1 x REGULAR ","\t€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 10 GB válidos em Portugal e em roaming zona 1 "," \t€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 100 GB válidos em Portugal e em roaming zona 1 ","TELEMÓVEIS","1 x REGULAR "],["","1 x LIGHT","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona + 500 MG nacionais e em roaming zona1","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes  is nacionais e em roaming Zona1 + 4GB nacionais e em roaming zona1","","1 x LIGHT"],["EQUIPAMENTOS ","Mobility","2","2","EQUIPAMENTOS ","Operadora"],["","Base","1","1","","Base"],["","Executive","","","","Executive"],["","Adapter","","","","Adapter"],["Sites/ Moradas","Moradas ","1","1","Sites/ Moradas","Moradas "],["MENSALIDADE FINAL","","91,66 €","70,38 €","MENSALIDADE FINAL",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],["> Oferta de duas mensalidades no valor de 70,38€","","","","",""],["> Manutençao do Desconto sob a mensalidade de 15% ","","","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( cartões REGULAR passam a ter 100GB e os cartoes LIGHT passam a 4 GB  )","","","","",""],["> Reduçao na mensalidade em 21,28€ + iva / Mês","","","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","","","",""],["Catálogo de equipamentos:","","","","",""]],"Gcp (4)":[["MORADA:","R SERPA PINTO 15 4-E","","","",""],["Nº DE CONTA:","1472218846","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA","",""],["","","","Global Connect Pack ","",""],["TELEVISÃO ","","TV + BOX","TV + BOX","TELEVISÃO ",""],[" INTERNET FIXA","","250/50 Mbps ","250/50 Mbps "," INTERNET FIXA",""],["1 x Utilizadores FIXO  ","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","1 x Utilizadores FIXO ",""],["TELEMÓVEIS"," 2 x Regulares","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 (4) + 10GB  válidos em Portugal e em roaming zona 1 ","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 (4) + 100GB válidos em Portugal e em roaming zona 1","TELEMÓVEIS"," 2 x Regulares"],["","1 x LIGHT","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 + 500 MB nacionais e em roaming zona1","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +  4GB nacionais e em roaming zona1(","","1 x LIGHT"],["EQUIPAMENTOS ","Mobility","1","1","EQUIPAMENTOS ","Mobility"],["EXTRAS ","Moradas:","1","1","EXTRAS ","Moradas:"],["MENSALIDADE FINAL","","101,05 €","86,50 €","MENSALIDADE FINAL",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],["> Plafond para equipamentos no valor de 200€ + iva ","","","","",""],["> Aumento do Desconto de 10%  para 25% sob a mensalidade ","","","","",""],["> Aumento dos dados Moveis dos cartões REGULARES para 100GB  e os cartoes LIGHT passa a 4GB","","","","",""],["> Reduçao na mensalidade no valor de 14,55€ ","","","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/","","",""]],"Gcp (18)":[["MORADA:","RT PALMEIRAS ED CASCAIS 1-A","","","",""],["Nº DE CONTA:","1466416812","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA Global Connect Pack","",""],["TELEVISÃO ","","nA","nA","TELEVISÃO ",""],["INTERNET FIXA","","250/50 Mbps","250/50 Mbps ","INTERNET FIXA",""],["4 x Utilizadores Fixo Movel Regular","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + € 0 para redes fixas e móveis nacionais e roaming zona1 + 10GB válidos em Portugal e em roaming zona 1","1000 min. para redes fixas e móveis nacionais + € 0 para redes fixas e móveis nacionais e roaming zona1 + 50GB válidos em Portugal e em roaming zona 1 ","4 x Utilizadores Fixo FIT  Movel Regular",""],["4 x Utilizadores Fixo Movel ultra","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + Ilimitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + 100GB  em Portugal e PUR  em roaming zona 1  ","1000 min. para redes fixas e móveis nacionais +Ilimitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1  + Ilimitado em Portugal e PUR em roaming zona 1","4 x Utilizadores Fixo FIT Movel ultra",""],["TELEMÓVEIS","5 x REGULAR ","\t€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 10 GB válidos em Portugal e em roaming zona 1 "," \t€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 100 GB válidos em Portugal e em roaming zona 1 ","TELEMÓVEIS","5 x REGULAR "],["EQUIPAMENTOS ","Operadora","1","1","EQUIPAMENTOS ","Operadora"],["","Base","7","7","","Base"],["","Conteudos Digitais","6.47","0","",""],["Sites/ Moradas","Moradas ","1","1","Sites/ Moradas","Moradas "],["MENSALIDADE FINAL","","365,36 €","320,38 €","MENSALIDADE FINAL",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],["> Oferta de 2 mensalidades ( no valor de € 320,38 /mês cada ) ","","","","",""],["> Manutençao do Desconto sob a mensalidade de 25% ","","","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( cartões REGULAR passam a ter 100GB e os cartoes ULTRA passam a ILIMITADOS  )","","","","",""],["> Plafond para aquisiçao de equipamentos no valor de 1360€ + iva ","","","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","","","",""],["Catálogo de equipamentos:","","","","",""]],"Gcp (5)":[["MORADA:","RUA 9 DE OUTUBRO","","","",""],["Nº DE CONTA:","1457714652","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA","",""],["","","","Global Connect Pack ","",""],["TELEVISÃO + BOX ","","NA","NA","TELEVISÃO + BOX ",""],["INTERNET FIXA",""," FIBRA  com 250/50 Mbps"," FIBRA  com 250/50 Mbps ","INTERNET FIXA",""],["1 UTILIZADOR FIXO","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + 1000 min. para redes fixas e móveis nacionais ( ","1000 min. para redes fixas e móveis nacionais","1 UTILIZADOR FIXO FIT",""],["TELEMÓVEIS"," 1 x Regulares","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 (4) + 10 GB válidos em Portugal e em roaming zona 1 ","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 (4) + 100GB válidos em Portugal e em roaming zona 1 ","TELEMÓVEIS"," 1  x Regulares"],["","2 x Ultra","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + 130GB em Portugal e PUR em roaming zona 1","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + dados moveis Ilimitado em Portugal e PUR em roaming zona 1","","2 x Ultra"],["","1 x Light","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +  500Mg nacionais e em roaming zona1","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +  4GB nacionais e em roaming zona1","","1 x Light"],["EQUIPAMENTOS ","Operadora Av","1","1","EQUIPAMENTOS ","Operadora Av"],["","Base","","","","Base"],["","Mobility","","","","Mobility"],["","Conteudos ","","","","Conteudos "],["ADD_ON","Site","1","1","ADD_ON","Site"],["MENSALIDADE FINAL","","112,85 €","105,71 €","MENSALIDADE FINAL",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],["> Oferta de 2 mensalidades ( no valor de 105,71€ /mês) cada ","","","","",""],["> Manutençao do Desconto  de 20% sob a mensalidade  ","","","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( cartões REGULARES passam a ter 100 GB os  LIGHT  passam a 4GB , ULTRAS passam a ILIMITADOS )","","","","",""],[" Plafond para aquisiçao de equipamentos no valor da mensalidade  ( 520€ + IVA )","","","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/","","",""]],"Gcp (10)":[["MORADA:","LARGO DA FEIRA 8 - FEIRA ","",""],["Nº DE CONTA:","1473215799","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA"],["","","","Global Connect Pack "],["TELEVISÃO + BOX ","","TV + 2 Box ( Android + Dvr ) ","TV + 2 Box ( Dvr + Dvr ) "],["INTERNET FIXA","","250/50 Mbps","250/50 Mbps"],["1 X TELEFONE FIXO ","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais "],["TELEMOVEIS "," 4 x Movel ULTRA","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1  + limitado em Portugal e PUR em roaming zona 1","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1  + limitado em Portugal e PUR em roaming zona 1"],["","6 x Movel Regular ","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1  + 50GB válidos em Portugal e em roaming zona 1","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 100GB válidos em Portugal e em roaming zona 1"],["EQUIPAMENTOS ","Operadora ","",""],["","Base","1","1"],["","Mobility","",""],["","Business","",""],["","Moradas","1","1"],["EXTRAS ","Conteudos Digitais ","",""],["MENSALIDADE FINAL","","256,10 €","202,43 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de duas mensalidades no valor de 202,43€ cada uma ","","",""],["> Manutençao  do desconto  de 25% sob a mensalidade ","","",""],["> Atualização dos dados Moveis por 36 meses ( cartões REGULARES  passam a 100 GB )","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""],["","","1",""]],"Gcp (6)":[["MORADA:","R D ANTONIO BARROSO 49","",""],["Nº DE CONTA:","1341264601","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA"],["","","","Global Connect Pack "],["TELEVISÃO + BOX ","","NA","NA"],["INTERNET FIXA","","250/50 Mbps ","250/50 Mbps "],["2 X TELEFONE FIXO","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais "],["TELEMÓVEIS","2 X Regulares","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 10 GB válidos em Portugal e em roaming zona 1","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 50GB válidos em Portugal e em roaming zona 1"],["","2 X Light ","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1  +  500 Mg nacionais e em roaming zona1(","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1  +  2GB  nacionais e em roaming zona1("],["","2 X Ultra","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + 100 GB em Portugal e PUR em roaming zona 1","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + Ilimitado em Portugal e PUR em roaming zona 1"],["EQUIPAMENTOS ","Operadora Avançada","",""],["","Base","1","1"],["","Mobility","1","1"],["","Business","",""],["EXTRAS ","Sites","1","1"],["MENSALIDADE FINAL","","144,76 €","136,06 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Plafond para aquisiçao de equipamentos no valor de 640€ + iva ","","",""],["> Aumento  do Desconto de 20% para 25% sob a mensalidade ","","",""],["> Mensalidade 136,06€ + iva  ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"Gcp (9)":[["MORADA:","R ALVARO AURELIO CEU OLIVEIRA 312 LJ 1","",""],["Nº DE CONTA:","501111280","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA"],["","","","Global Connect Pack "],["TELEVISÃO ","","nA","nA"],["INTERNET FIXA","","250/50 Mbps ","250/50 Mbps"],["1 x TELEFONE FIXO  ","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais (1)","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais (1)"],["TELEMÓVEIS","2 x Light","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1  +  500 Mb nacionais e em roaming zona1","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1  +  2GB nacionais e em roaming zona1"],["","1 x Regulares","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 (4) + 10GB válidos em Portugal e em roaming zona 1 ","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 (4) + 100GB válidos em Portugal e em roaming zona 1 "],["EQUIPAMENTOS ","Operadora","",""],["","Base","",""],["","Mobility","1","1"],["","Business","",""],["Sites/ Moradas","","1","1"],["EXTRAS ","Conteudos ","",""],["MENSALIDADE FINAL","","61,10 €","61,10 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Aumento dos dados moveis dos cartoes Regulares para 100GB e dos cartoes Light passam a 2GB","","",""],["> Manutençao do Desconto sob a mensalidade 25%","","",""],["> Oferta de duas mensalidade no valor de 61,10€ cada ","","",""],["> Atribuiçao de Plafond para aquisiçao de equipamentos  ( 160€ + IVA ) ","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"Gcp (11)":[["MORADA:","AV LUIS BIVAR 85C","","","",""],["Nº DE CONTA:","1336374566","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA","",""],["","","","Global Connect Pack ","",""],["TELEVISÃO + BOX ","","na","na","TELEVISÃO + BOX ",""],["INTERNET FIXA","","250/100 Mbps","250/100 Mbps","INTERNET FIXA",""],["3 Utilizadores Fixos ","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","3 Utilizadores Fixos",""],["TELEMÓVEIS","19 Utilizadores Movel REGULAR","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 10 GB válidos em Portugal e em roaming zona 1","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 100GB válidos em Portugal e em roaming zona 1","TELEMÓVEIS","19 Utilizadores Movel REGULAR"],["EQUIPAMENTOS ","Operadora ","1","1","EQUIPAMENTOS ","Operadora "],["","Base","8","8","","Base"],["","Mobility","2","2","","Mobility"],["","IVR","24,00 €","24,00 €","","IVR"],["EXTRAS ","Moradas","1","1","EXTRAS ",""],["MENSALIDADE FINAL","","244,98 €","198,28 €","MENSALIDADE FINAL",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],["> Oferta de 2 mensalidades ( no valor de 174,28€ /mês) ","","","","",""],["> Manutenção do Desconto de 25% sob a mensalidade ","","","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( cartões Regulares passam a 100GB )","","","","",""],["> Plafond para equipamentos no valor de 240€ + iva ","","","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/","","",""]],"Gcp (12)":[["MORADA:","PC BOM SUCESSO 127 3-S 302-PORTO","",""],["Nº DE CONTA:","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA"],["","","","Global Connect Pack "],["TELEVISÃO + BOX ","","nA","nA"],["INTERNET FIXA","","250/50 Mbps","250/50 Mbps"],["7 X TELEFONE FIXO + 1 X TELEFONE FIXO LIGHT + 2 TELEFONES FIXO MOVEL ULTRA ","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + Ilimitado para redes fixas e móveis nacionais entre colaboradores ","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + Ilimitado para redes fixas e móveis nacionais entre colaboradores "],["","2 X Light ","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1  +  500 Mg nacionais e em roaming zona1(","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1  +  4GB nacionais e em roaming zona1("],["","2 X ULTRA  "," limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + 100 GB em Portugal e PUR em roaming zona 1","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + Ilimitado em Portugal e PUR em roaming zona 1"],["EQUIPAMENTOS FIXOS ","Operadora ","1","1"],["","Base","",""],["","Mobility","2","2"],["","Business","7","7"],["","Conteudos ","12,94 €",""],["EXTRAS ","Sites","",""],["MENSALIDADE FINAL","","",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de 2 mensalidades ( no valor de 75,75€ /mês) ","","",""],["> Manutenção do Desconto de 15% sob a mensalidade ","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( Cartoes Light  passam a 4GB e Cartoes Ultra passam a Ilimitados )","","",""],["> Atribuiçao de Plafond para aquisiçao de equipamentos  ( 240€ + IVA ) ","","",""],["> Mensalidade 75,75€ + iva ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"Gcp (13)":[["MORADA:","R DR SOUSA ROSA 60","",""],["Nº DE CONTA:","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA Global Connect Pack"],["TELEVISÃO ","","na","na"],["INTERNET FIXA","","Velocidade 250/50 Mbps ","Velocidade 250/50 Mbps "],["1 X TELEFONE FIXO ","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais"],["TELEMÓVEIS ( 4 CARTÕES)","1 X Regulares","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 10 GB válidos em Portugal e em roaming zona 1","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 100 GB válidos em Portugal e em roaming zona 1"],["","3 X Ultra","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + 100GB  em Portugal e PUR em roaming zona 1","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + Ilimitado em Portugal e PUR em roaming zona 1"],["EQUIPAMENTOS ","Operadora ","",""],["","Base","",""],["","Mobility","1","1"],["","Business","",""],["EXTRAS ","Sites ","1","1"],["","Conteudos ","",""],["MENSALIDADE FINAL","","114,85 €","114,85 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de 2 mensalidades ( no valor de 114,85€ /mês) ","","",""],["> Manutenção do Desconto de 25% sob a mensalidade ","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( Cartoes Regulares passam a 100GB  )","","",""],["> Plafond para aquisiçao de equipamentos  no valor de 680€ + iva","","",""],["> Mensalidade 114,85€ + iva ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"Gcp (14)":[["MORADA:","AV REPUBLICA ED REPUBLIC 1-Q","",""],["Nº DE CONTA:","1351181092","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA"],["","","","Global Connect Pack "],["TELEVISÃO ","","TV + Box","TV + Box "],["INTERNET FIXA","","250/50 Mbps + Add On para 1000/400 Mbps","250/50 Mbps + Add On para 1000/400 Mbps"],[" 4 x TELEFONE FIXO  FIT","","1000 min. para redes fixas e móveis nacionais","1000 min. para redes fixas e móveis nacionais"],["TELEMÓVEIS ( 4 cartões )","","",""],["","4 X Movel Ultra ","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + 100 GB em Portugal e PUR em roaming zona 1 ","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + Ilimitado em Portugal e PUR em roaming zona 1 "],["EQUIPAMENTOS ","Operadora","1","1"],["","Base","",""],["","Mobility","3","3"],["","Conteudos  Extra","30,74 €",""],["","Site ","1","1"],["EXTRAS ","","",""],["MENSALIDADE FINAL","","240,79 €","184,34 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Mensalidade 184,34€ + iva ","","",""],["> Oferta de duas Mensalidades no valor de 184,34€ cada uma ","","",""],["> Manutençao do Desconto  de 15% sob a mensalidade ","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( cartoes ULTRAS passam a  ILIMITADOS  ) ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"Gcp (15)":[["MORADA:","ZN INDUSTRIAL SAO DOMINGOS LT 1 .-119 - AROUCA ","",""],["Nº DE CONTA:","1467813356","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA"],["","","","Global Connect Pack "],["TELEVISÃO + BOX ","","na","na"],["INTERNET FIXA","","250/50 Mbps","250/50 Mbps"],["1  X TELEFONE FIXOS + 3 TELEFONES FIXOS LIGHT ","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + Ilimitado para redes fixas e móveis nacionais entre colaboradores","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + Ilimitado para redes fixas e móveis nacionais entre colaboradores"],["TELEMÓVEIS ( 7 TELEMOVEIS )","1 X Regulares","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 10 GB válidos em Portugal e em roaming zona 1","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 100GB válidos em Portugal e em roaming zona 1"],["","1 X Light ","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1  +  500 Mg nacionais e em roaming zona1(","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1  +  4GB nacionais e em roaming zona1("],["EQUIPAMENTOS ","Base","",""],["","Business","",""],["","Mobility","3","3"],["","Operadora","1","1"],["EXTRAS ","Sites","1","1"],["","Conteudos ","",""],["MENSALIDADE FINAL","","77,44 €","74,70 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de 2 mensalidades ( no valor de 74,70€ /mês) ","","",""],["> Manutenção do Desconto de 25% sob a mensalidade ","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( cartões Regulares passam a 100GB + Cartoes Light  passam a 4GB )","","",""],["> Mensalidade 74,70€ + iva ","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""]],"Gcp (7)":[["MORADA:","VI ENG BELMIRO MENDES AZEVEDO 47 1-SL4","","","",""],["Nº DE CONTA:","1447749806","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA Global Connect Pack ","",""],["TELEVISÃO ","","TV + BOX","TV + BOX","TELEVISÃO ",""],["INTERNET FIXA",""," 250/50 Mbps "," 250/50 Mbps","INTERNET FIXA",""],["TELEFONE FIXO ",""," 2 x Utilizadores FIXOS a €0 para redes fixas e móveis nacionais e 50 destinos internacionais (1) "," 2 x Utilizadores FIXOS FIT  1000 min. para redes fixas e móveis nacionais","TELEFONE FIXO FIT",""],["TELEMÓVEIS ( 5 cartões ) ","1 x Regular","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 (4) + 10GB  válidos em Portugal e em roaming zona 1 ","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 (4) + 100 GB válidos em Portugal e em roaming zona 1","TELEMÓVEIS ( 5 cartões )","1 x Regular"],["","4 x Ultra ","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + 100GB  Portugal e PUR em roaming zona 1 ","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + Ilimitado em Portugal e PUR em roaming zona 1 ","","4 x Ultra "],["EQUIPAMENTOS ","Operadora ","1","1","EQUIPAMENTOS ","Operadora "],["","Base","1","1","","Base"],["","Sites ","1","1","","Sites "],["EXTRAS ","","","","","EXTRAS "],["MENSALIDADE FINAL","","178,16 €","147,72 €","MENSALIDADE FINAL",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],["> Oferta de 2 mensalidades ( no valor de 147,72 € /mês) cada.","","","","",""],["> Manutençao do Desconto 25% sob a mensalidade .","","","","",""],["> Duplicaçao dos dados Moveis por 36 meses (  REGULARES passam a ter 100 GB e os ULTRAS passam a ILIMITADOS   )","","","","",""],["> Reduçao na mensalidade no valor de 30,44€","","","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","","","",""],["Catálogo de equipamentos:","","","","",""]],"Gcp (17)":[["MORADA:","LU GRANJA MARQUES 9","","","",""],["INSTALAÇAO ","","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA","",""],["","","","Global Connect Pack ","",""],["TELEVISÃO + BOX ","","na","na","TELEVISÃO + BOX ",""],["INTERNET FIXA","","250/50 Mbps  ","250/50 Mbps  ","INTERNET FIXA",""],[" 2 x UTILIZADORES FIXO + 2 x UTILIZADORES FIXOS LIGHT","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais + Ilimitado para redes fixas e móveis nacionais entre colaboradores","1000 min. para redes fixas e móveis nacionais + Ilimitado para redes fixas e móveis nacionais entre colaboradores"," 2 x UTILIZADORES FIXO FIT + 2 x UTILIZADORES FIXOS LIGHT",""],["5 TELEMOVEL ","Operadora ","1","1","","5 TELEMOVEL "],["","2 x Utilizado Movel LIGHT","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +  500 MG nacionais e em roaming zona1(","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +  2GB nacionais e em roaming zona1(","2 x Utilizador Movel LIGHT",""],["","3 x Utilizador Movel ULTRA","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + 100GB  em Portugal e PUR em roaming zona 1 ","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1  + Ilimitado em Portugal e PUR em roaming zona 1 ","3 x Utilizador Movel ULTRA",""],["TELEFONES FIXOS ","Mobility","","","TELEFONES FIXOS ","Mobility"],["","Base","3","3","","Base"],["","Operadora ","1","1","","Operadora "],["","Conteudos","25,88 €","0,00 €","","IVR"],["","Sites ","1","1","","Sites "],["MENSALIDADE FINAL","","188,38 €","141,41 €","",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],["> Manutençao do desconto  nos 10%","","","","",""],[">  Aumento dos dados moveis nos Cartoes LIGHT e ULTRA ( LIGHT passa a 4GB e ULTRA passa a Ilimitado )","","","","",""],["> Oferta de Duas mensalidades no valor de 141,41€ cada ","","","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/","","",""]],"Gcp (19)":[["MORADA:","R FLORES 101","","","",""],["Nº DE CONTA:","1311478454","","","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA Global Connect Pack ","",""],["TELEVISÃO ","","TV + BOX","TV + BOX","TELEVISÃO ",""],["INTERNET FIXA","","250/50 Mbps ","250/50 Mbps ","INTERNET FIXA",""],["6 x UTILIZADOR FIXO ","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","1000 min. para redes fixas e móveis nacionais","6 x UTILIZADOR FIXO FIT",""],["TELEMÓVEIS ( 9 cartões )","7 x MOVEL REGULAR ","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 10GB válidos em Portugal e em roaming zona 1 ","€ 0 para todas as redes fixas e móveis nacionais e em roaming zona1 + 100 GB válidos em Portugal e em roaming zona 1 ","TELEMÓVEIS ( 9 cartões )","7 x MOVEL REGULAR "],["","2 X MOVEL LIGHT ","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +  500 MG nacionais e em roaming zona1(","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +  4GB nacionais e em roaming zona1(","","2 X MOVEL LIGHT "],["EQUIPAMENTOS ","BASE","5","5","EQUIPAMENTOS ","BASE"],["","OPERADORA","1","1","","OPERADORA"],["","Site ","1","1","","Site "],["EXTRAS ","Extras","2,00 €","2,00 €","EXTRAS ","Extras"],["MENSALIDADE FINAL","","261,16 €","219,11 €","MENSALIDADE FINAL",""],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","","","",""],[">  Mensalidade 219,11€ + iva ","","","","",""],["> Oferta de duas mensalidades no valor de 219,11€","","","","",""],[">Manutençao do Desconto  de 20% sob a mensalidade ","","","","",""],["> Duplicaçao dos dados Moveis por 36 meses ( cartão REGULAR passa a ter 100GB e o LIGHT passa a  4GB ) ","","","","",""],["> Reduçao na mensalidade no valor de 42,05€/Mês","","","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","","","",""],["Catálogo de equipamentos:","","","","",""]],"Gcp (16)":[["MORADA:","RUA ANTONIO NICOLAU D´ALMEIDA 45 2-S 12  PORTO","",""],["Nº DE CONTA:","1369971173","",""],["","","ATUALMENTE Global Connect Pack ","PROPOSTA"],["","","","Global Connect Pack "],["TELEVISÃO + BOX ","","",""],["INTERNET FIXA","","250/50 Mbps","1000/400 Mbps "],["2 X TELEFONE FIXOS","","€ 0 para redes fixas e móveis nacionais e 50 destinos internacionais ","1000 min. para redes fixas e móveis nacionais"],["TELEMOVEIS ","2 X  Movel ULTRA","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 100 GB em Portugal e PUR em roaming zona 1","limitado para todas as redes fixas e móveis nacionais, 1000 min. Internacionais zona I0I1I2I3 e em roaming zona1 + Ilimitado em Portugal e PUR em roaming zona 1"],["","1 x LIGHT ","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +2GB nacionais e em roaming zona1","2000 SMS/min para redes fixas nacionais e rede móvel MEO e 100 min./SMS para outras redes móveis nacionais e em roaming Zona1 +4GB nacionais e em roaming zona1"],["EQUIPAMENTOS ","Operadora ","1","1"],["","Base","1","1"],["","Mobility","",""],["","Business","",""],["","Moradas","1","1"],["EXTRAS ","Conteudos Digitais ","",""],["MENSALIDADE FINAL","","104,16 €","100,82 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Oferta de duas mensalidades no valor de 100,82€ cada uma ","","",""],["> Manutençao  do desconto  de 20% sob a mensalidade ","","",""],["> Atualização dos dados Moveis por 36 meses ( cartões ULTRA passam a ILIMITADOS e Cartoes LIGHT passam a ter 4GB  )","","",""],["Os produtos e serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""],["Catálogo de equipamentos:","","https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/",""],["","","1",""]],"M Movel (2)":[["MORADA:","","",""],["Nº DE TLM:","961813171","",""],["","","ATUALMENTE M móvel 1000+50GB","PROPOSTA  M Movel  Ilimitado"],["DADOS MOVEIS","","50 GB","ILIMITADO"],["VOZ MOVEL","","1000 Minutos +1000 SMS","ILIMITADO"],["MENSALIDADE","","26,06 €","13,44 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Reduçao na mensalidade em 13,78€ ","","",""],["Os serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]],"M Movel":[["MORADA:","R CONDOMINHAS 59","",""],["Nº DE TLM:","925100785","",""],["","","ATUALMENTE M Movel ILIMITADO","PROPOSTA  M Movel  Ilimitado"],["DADOS MOVEIS","","ILIMITADO","ILIMITADO"],["VOZ MOVEL","","ILIMITADO","ILIMITADO"],["MENSALIDADE","","26,06 €","13,44 €"],["PROPOSTA: OFERTAS, DESCONTOS E MELHORIAS","","",""],["> Reduçao na mensalidade em 12,62€ ","","",""],["Os serviços destinam-se ao mercado empresarial. Aos valores apresentados acresce o IVA à taxa legal em vigor. Condições válidas mediante vinculação por 24 meses com adesão ou manutenção dos serviços de fatura eletrónica e pagamento por débito direto. Condições sujeitas a aprovação da Altice.","","",""]]}</script>
+<script>
+(function(){
+  const ALERT_WINDOW_DAYS = 180; // dias de antecedência antes do fim da fidelização
+  let API_URL = '';
+  let TOKEN = '';
+  let records = [];
+  let filtered = [];
+  let sortKey = 'days';
+  let sortDir = 1;
+  let page = 1;
+  const pageSize = 50;
+
+  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data'];
+  // row array from Apps Script: [rowNum, A..S] -> index i+1 = COLS[i]
+  // estado_contato = coluna R, estado_data = coluna S (têm de existir na folha — ver Code.gs).
+
+  // Hipóteses do "Estado do contacto" — para adicionar mais opções, acrescenta aqui.
+  const ESTADO_OPTIONS = ['Em negociação', 'Aguardo documentação', 'Concluído'];
+
+  function stripAccents(s){ return s.normalize('NFD').replace(/[̀-ͯ]/g,''); }
+  function parseISO(s){
+    if(!s) return null;
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+    if(!m) return null;
+    return new Date(+m[1], +m[2]-1, +m[3]);
+  }
+  function fmtDate(d){
+    if(!d) return '—';
+    const dd = String(d.getDate()).padStart(2,'0');
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    return `${dd}/${mm}/${d.getFullYear()}`;
+  }
+  function todayISO(){
+    const d = new Date();
+    const y=d.getFullYear(), m=String(d.getMonth()+1).padStart(2,'0'), dd=String(d.getDate()).padStart(2,'0');
+    return `${y}-${m}-${dd}`;
+  }
+  function esc(s){
+    return String(s==null? '': s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
   }
 
-  var startRow = FIRST_DATA_ROW + offset;
-  var numRows = Math.min(limit, lastRow - startRow + 1);
-  if (numRows <= 0) {
-    return jsonOut({ headers: headerRow_(sheet), rows: [], total: totalDataRows, offset: offset, hasMore: false });
+  const today = new Date(); today.setHours(0,0,0,0);
+
+  function statusFromDays(days, fimRaw){
+    if(!Number.isFinite(days)){
+      return { status:'outro', statusLabel: fimRaw ? String(fimRaw).charAt(0).toUpperCase()+String(fimRaw).slice(1) : 'Sem informação' };
+    }
+    if(days < 0) return { status:'atrasado', statusLabel:`Atrasado há ${Math.abs(days)} dia(s)` };
+    if(days <= ALERT_WINDOW_DAYS) return { status:'alerta', statusLabel:`Faltam ${days} dia(s)` };
+    return { status:'futuro', statusLabel:`Faltam ${days} dia(s)` };
   }
 
-  var values = sheet.getRange(startRow, 1, numRows, LAST_COL).getValues();
-  var out = [];
-  for (var i = 0; i < values.length; i++) {
-    var row = values[i];
-    if (row.join('') === '') continue; // ignora linhas totalmente vazias
-    var formatted = row.map(formatCell);
-    out.push([startRow + i].concat(formatted));
+  function buildRecord(rowArr){
+    const rowNum = rowArr[0];
+    const get = (name)=> rowArr[COLS.indexOf(name)+1];
+    const fimRaw = get('fim_fidelizacao');
+    const proxRaw = get('proxima_refid');
+    const fimDate = parseISO(fimRaw);
+    const proxDate = parseISO(proxRaw);
+    const days = fimDate ? Math.round((fimDate - today)/86400000) : Infinity;
+    const s = statusFromDays(days, fimRaw);
+    const tarifario = get('tarifario') || '';
+    const rec = {
+      rowNum,
+      cliente: get('cliente')||'', nif: get('nif')||'', subagente: get('subagente')||'',
+      tarifario, tarifNorm: tarifario.trim().toUpperCase(),
+      localidade: get('localidade')||'', contato: get('contato')||'', email: get('email')||'',
+      telemovel: get('telemovel')||'', observacoes: get('observacoes')||'',
+      morada: get('morada')||'', cp: get('cp')||'',
+      estadoContato: get('estado_contato')||'', estadoData: get('estado_data')||'',
+      fimDate, fimRaw, proxDate, proxRaw,
+      status: s.status, statusLabel: s.statusLabel, days
+    };
+    rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
+    return rec;
   }
 
-  var hasMore = (startRow + numRows - 1) < lastRow;
-  return jsonOut({
-    headers: headerRow_(sheet),
-    rows: out,
-    total: totalDataRows,
-    offset: offset,
-    nextOffset: offset + numRows,
-    hasMore: hasMore,
-    generatedAt: new Date().toISOString()
+  // ---------- Gate / connection ----------
+  const gate = document.getElementById('gate');
+  const app = document.getElementById('app');
+  const gateError = document.getElementById('gateError');
+
+  function paramsFromLocation(){
+    const p = new URLSearchParams(location.search);
+    return { api: p.get('api')||'', token: p.get('token')||'' };
+  }
+  const initial = paramsFromLocation();
+  // Só pré-preenchemos os campos visíveis quando NÃO vamos ligar automaticamente —
+  // se ligarmos automaticamente a partir do URL, usamos os valores da query string
+  // diretamente (sem passar pelos <input>), para o autofill do navegador nunca
+  // ter oportunidade de sobrepor o token com um valor guardado antigo.
+  if(initial.api && initial.token){
+    connect(initial.api, initial.token);
+  } else {
+    if(initial.api) document.getElementById('apiUrl').value = initial.api;
+    if(initial.token) document.getElementById('apiToken').value = initial.token;
+  }
+
+  document.getElementById('connectBtn').addEventListener('click', ()=>{
+    connect(document.getElementById('apiUrl').value.trim(), document.getElementById('apiToken').value.trim());
   });
-}
 
-function headerRow_(sheet) {
-  return sheet.getRange(HEADER_ROW, 1, 1, LAST_COL).getValues()[0];
-}
-
-function doPost(e) {
-  try {
-    var body = JSON.parse(e.postData.contents);
-    if (body.token !== TOKEN) {
-      return jsonOut({ ok: false, error: 'token inválido' });
+  function connect(apiUrl, token){
+    API_URL = (apiUrl||'').trim();
+    TOKEN = (token||'').trim();
+    gateError.classList.remove('show');
+    if(!API_URL || !TOKEN){
+      gateError.textContent = 'Preenche o URL e o token.';
+      gateError.classList.add('show');
+      return;
     }
-    var sheet = SpreadsheetApp.getActive().getSheetByName(SHEET_NAME);
-    var colLetters = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S'];
+    document.getElementById('connectBtn').disabled = true;
+    document.getElementById('connectBtn').textContent = 'A ligar…';
+    loadData(true);
+  }
 
-    if (body.action === 'create') {
-      var newRow = sheet.getLastRow() + 1;
-      var values = body.values || {};
-      for (var vKey in values) {
-        var vIdx = colLetters.indexOf(vKey.toUpperCase());
-        if (vIdx > -1 && values[vKey] !== '' && values[vKey] != null) {
-          sheet.getRange(newRow, vIdx + 1).setValue(values[vKey]);
+  function loadData(firstLoad){
+    setSyncState('saving');
+    const allRows = [];
+
+    function fetchPage(offset){
+      const url = API_URL + '?token=' + encodeURIComponent(TOKEN) + '&offset=' + offset;
+      return fetch(url, {method:'GET'})
+        .then(r=>r.json())
+        .then(data=>{
+          if(data.ok === false){
+            throw new Error(data.error || 'erro desconhecido');
+          }
+          allRows.push.apply(allRows, data.rows||[]);
+          const progressText = 'A carregar… ' + allRows.length.toLocaleString('pt-PT') + (data.total? (' / '+data.total.toLocaleString('pt-PT')) : '');
+          if(firstLoad){
+            document.getElementById('connectBtn').textContent = progressText;
+          } else {
+            const sl = document.getElementById('summaryLine');
+            if(sl) sl.textContent = progressText;
+          }
+          if(data.hasMore){
+            return fetchPage(data.nextOffset);
+          }
+        });
+    }
+
+    fetchPage(0)
+      .then(()=>{
+        records = allRows.map(buildRecord);
+        setSyncState('ok');
+        if(firstLoad){
+          gate.classList.add('hidden');
+          app.classList.remove('hidden');
+          initApp();
+        } else {
+          populateFilterOptions();
+          renderTiles();
+          renderEstadoChips();
+          applyFilters();
         }
-      }
-      return jsonOut({ ok: true, row: newRow, created: true });
-    }
-
-    if (body.action === 'sendProposal') {
-      var to = body.to;
-      var subject = body.subject || 'Proposta';
-      var htmlBody = body.html || '';
-      if (!to) {
-        return jsonOut({ ok: false, error: 'sem e-mail do cliente' });
-      }
-      MailApp.sendEmail({
-        to: to,
-        subject: subject,
-        htmlBody: htmlBody,
-        body: 'A tua proposta segue neste e-mail — ativa a visualização em HTML para a veres formatada.'
+      })
+      .catch(err=>{
+        setSyncState('error');
+        if(firstLoad){
+          gateError.textContent = 'Não foi possível ligar: ' + err.message + '. Confirma o URL, o token, e se a implementação está com acesso "Qualquer pessoa".';
+          gateError.classList.add('show');
+          document.getElementById('connectBtn').disabled = false;
+          document.getElementById('connectBtn').textContent = 'Ligar';
+        }
       });
-      return jsonOut({ ok: true, sent: true });
-    }
+  }
 
-    var row = body.row;
-    if (!row || row < FIRST_DATA_ROW) {
-      return jsonOut({ ok: false, error: 'linha inválida' });
-    }
-    var lastRow = sheet.getLastRow();
-    if (row > lastRow) {
-      return jsonOut({ ok: false, error: 'linha inválida' });
-    }
+  function setSyncState(state){
+    const dot = document.getElementById('syncDot');
+    if(!dot) return;
+    dot.className = 'sync-dot' + (state==='saving'?' saving':state==='error'?' error':'');
+  }
 
-    if (body.action === 'delete') {
-      sheet.deleteRow(row);
-      return jsonOut({ ok: true, row: row, deleted: true });
-    }
+  document.getElementById('refreshBtn').addEventListener('click', ()=>loadData(false));
 
-    var updates = body.updates || {}; // ex: {"Q": "texto novo", "D": "2026-08-01"}
-    var applied = {};
-    for (var key in updates) {
-      var idx = colLetters.indexOf(key.toUpperCase());
-      if (idx > -1) {
-        sheet.getRange(row, idx + 1).setValue(updates[key]);
-        applied[key] = updates[key];
+  // ---------- App ----------
+  let tarifSelEl, subListEl, tilesWrap, estadoChipsWrap, activeStatus = '', activeEstadoFilter = '';
+  const tilesDef = [
+    {key:'atrasado', label:'Atrasado', dot:'critical', desc:'já passou a data'},
+    {key:'alerta', label:'Em alerta', dot:'warning', desc:`dentro de ${ALERT_WINDOW_DAYS} dias`},
+    {key:'futuro', label:'Futuro', dot:'good', desc:`além de ${ALERT_WINDOW_DAYS} dias`},
+    {key:'outro', label:'Sem fidelização / outro', dot:'muted', desc:'sem data associada'},
+  ];
+  const estadoChipsDef = [
+    {value:'', label:'Todos'},
+    ...ESTADO_OPTIONS.map(opt=>({value:opt, label:opt})),
+    {value:'__vazio__', label:'Sem estado'},
+  ];
+
+  function initApp(){
+    tarifSelEl = document.getElementById('tarifFilter');
+    subListEl = document.getElementById('subList');
+    tilesWrap = document.getElementById('tiles');
+    estadoChipsWrap = document.getElementById('estadoContatoChips');
+
+    populateFilterOptions();
+
+    document.getElementById('search').addEventListener('input', debounce(applyFilters,150));
+    document.getElementById('statusFilter').addEventListener('change', applyFilters);
+    tarifSelEl.addEventListener('change', applyFilters);
+    document.getElementById('subFilter').addEventListener('input', debounce(applyFilters,150));
+    document.getElementById('clearFilters').addEventListener('click', ()=>{
+      document.getElementById('search').value='';
+      document.getElementById('statusFilter').value='';
+      tarifSelEl.value='';
+      document.getElementById('subFilter').value='';
+      activeStatus='';
+      activeEstadoFilter='';
+      applyFilters();
+    });
+    document.getElementById('prevPage').addEventListener('click', ()=>{ if(page>1){page--; render();} });
+    document.getElementById('nextPage').addEventListener('click', ()=>{
+      const totalPages = Math.max(1, Math.ceil(filtered.length/pageSize));
+      if(page<totalPages){page++; render();}
+    });
+    document.getElementById('exportCsv').addEventListener('click', exportXls);
+    document.getElementById('newRecordBtn').addEventListener('click', ()=>{
+      creatingNew = true;
+      editingRowNum = null;
+      confirmingDeleteRowNum = null;
+      page = 1;
+      render();
+    });
+    document.getElementById('themeToggle').addEventListener('click', ()=>{
+      const cur = document.documentElement.getAttribute('data-theme');
+      document.documentElement.setAttribute('data-theme', cur==='dark' ? 'light' : 'dark');
+    });
+
+    const proposalTemplateSelect = document.getElementById('proposalTemplateSelect');
+    PROPOSTAS_NAMES.forEach(name=>{
+      const o = document.createElement('option');
+      o.value = name; o.textContent = name;
+      proposalTemplateSelect.appendChild(o);
+    });
+    proposalTemplateSelect.addEventListener('change', (e)=> renderProposalGrid(e.target.value));
+    document.getElementById('proposalCloseBtn').addEventListener('click', closeProposalModal);
+    document.getElementById('proposalCloseBtn2').addEventListener('click', closeProposalModal);
+    document.getElementById('proposalSendBtn').addEventListener('click', sendProposal);
+    document.getElementById('proposalOverlay').addEventListener('click', (e)=>{
+      if(e.target.id==='proposalOverlay') closeProposalModal();
+    });
+
+    filtered = records.slice();
+    renderTiles();
+    renderEstadoChips();
+    sortRecords();
+    render();
+  }
+
+  function debounce(fn, ms){ let t; return (...a)=>{ clearTimeout(t); t=setTimeout(()=>fn(...a), ms); }; }
+
+  function populateFilterOptions(){
+    const tarifGroups = {};
+    records.forEach(r=>{
+      if(!r.tarifNorm) return;
+      const g = tarifGroups[r.tarifNorm] || (tarifGroups[r.tarifNorm] = {});
+      g[r.tarifario] = (g[r.tarifario]||0) + 1;
+    });
+    const tarifs = Object.keys(tarifGroups).map(norm=>{
+      const variants = tarifGroups[norm];
+      const label = Object.keys(variants).sort((a,b)=>variants[b]-variants[a])[0];
+      return {norm, label};
+    }).sort((a,b)=>a.label.localeCompare(b.label,'pt'));
+    const prevTarif = tarifSelEl.value;
+    tarifSelEl.innerHTML = '<option value="">Todos</option>';
+    tarifs.forEach(t=>{ const o=document.createElement('option'); o.value=t.norm; o.textContent=t.label; tarifSelEl.appendChild(o); });
+    tarifSelEl.value = prevTarif;
+
+    const subs = [...new Set(records.map(r=>r.subagente).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt'));
+    subListEl.innerHTML = '';
+    subs.forEach(s=>{ const o=document.createElement('option'); o.value=s; subListEl.appendChild(o); });
+  }
+
+  // renderTiles()/renderEstadoChips() recontam TODOS os registos e reconstroem
+  // o HTML — só devem correr quando os dados mudam (carregar, guardar, apagar,
+  // criar). Filtrar/pesquisar não muda essas contagens, por isso applyFilters()
+  // usa as versões leves (updateTilesActive/updateEstadoChipsActive) que só
+  // ligam/desligam a classe "active" — assim escrever no campo de pesquisa não
+  // fica preso a recalcular tudo a cada tecla, com milhares de linhas.
+  function renderTiles(){
+    const counts = {atrasado:0, alerta:0, futuro:0, outro:0};
+    records.forEach(r=>counts[r.status]++);
+    tilesWrap.innerHTML='';
+
+    tilesDef.forEach(t=>{
+      const div = document.createElement('div');
+      div.className = 'tile'+(activeStatus===t.key?' active':'');
+      div.dataset.key = t.key;
+      div.innerHTML = `<div class="label"><span class="dot ${t.dot}"></span>${t.label}</div>
+        <div class="value">${counts[t.key].toLocaleString('pt-PT')}</div>
+        <div class="subtitle" style="font-size:11px;margin-top:2px;">${t.desc}</div>`;
+      div.onclick = ()=>{ activeStatus = (activeStatus===t.key)? '' : t.key; document.getElementById('statusFilter').value=activeStatus; applyFilters(); };
+      tilesWrap.appendChild(div);
+    });
+  }
+
+  function updateTilesActive(){
+    tilesWrap.querySelectorAll('.tile[data-key]').forEach(div=>{
+      div.classList.toggle('active', activeStatus===div.dataset.key);
+    });
+  }
+
+  function renderEstadoChips(){
+    const counts = { '': records.length, '__vazio__': 0 };
+    ESTADO_OPTIONS.forEach(opt=>{ counts[opt] = 0; });
+    records.forEach(r=>{
+      if(r.estadoContato){ counts[r.estadoContato] = (counts[r.estadoContato]||0) + 1; }
+      else { counts['__vazio__']++; }
+    });
+    estadoChipsWrap.innerHTML = '';
+    estadoChipsDef.forEach(c=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.dataset.value = c.value;
+      btn.className = 'estado-chip' + (activeEstadoFilter===c.value ? ' active' : '');
+      btn.innerHTML = `${esc(c.label)} <span class="n">${(counts[c.value]||0).toLocaleString('pt-PT')}</span>`;
+      btn.addEventListener('click', ()=>{
+        activeEstadoFilter = (activeEstadoFilter===c.value) ? '' : c.value;
+        applyFilters();
+      });
+      estadoChipsWrap.appendChild(btn);
+    });
+  }
+
+  function updateEstadoChipsActive(){
+    estadoChipsWrap.querySelectorAll('.estado-chip[data-value]').forEach(btn=>{
+      btn.classList.toggle('active', activeEstadoFilter===btn.dataset.value);
+    });
+  }
+
+  function applyFilters(){
+    const q = stripAccents(document.getElementById('search').value.trim().toLowerCase());
+    const st = document.getElementById('statusFilter').value;
+    const tar = tarifSelEl.value;
+    const sub = stripAccents(document.getElementById('subFilter').value.trim().toLowerCase());
+    activeStatus = st;
+    filtered = records.filter(r=>{
+      if(q && !r.searchBlob.includes(q)) return false;
+      if(st && r.status!==st) return false;
+      if(tar && r.tarifNorm!==tar) return false;
+      if(sub && !stripAccents((r.subagente||'').toLowerCase()).includes(sub)) return false;
+      if(activeEstadoFilter==='__vazio__' && r.estadoContato) return false;
+      if(activeEstadoFilter && activeEstadoFilter!=='__vazio__' && r.estadoContato!==activeEstadoFilter) return false;
+      return true;
+    });
+    sortRecords();
+    page = 1;
+    updateTilesActive();
+    updateEstadoChipsActive();
+    render();
+  }
+
+  function sortRecords(){
+    const statusRank = {atrasado:0, alerta:1, futuro:2, outro:3};
+    filtered.sort((a,b)=>{
+      let av, bv;
+      if(sortKey==='days'){
+        const ra = statusRank[a.status], rb = statusRank[b.status];
+        if(ra!==rb) return (ra-rb)*sortDir;
+        av = a.days===Infinity? 1e15 : a.days; bv = b.days===Infinity? 1e15 : b.days;
+        return (av-bv)*sortDir;
       }
+      av = (a[sortKey]||''); bv = (b[sortKey]||'');
+      if(av instanceof Date || bv instanceof Date){
+        av = av? av.getTime():-Infinity; bv = bv? bv.getTime():-Infinity;
+        return (av-bv)*sortDir;
+      }
+      return String(av).localeCompare(String(bv),'pt')*sortDir;
+    });
+  }
+
+  const columns = [
+    {key:'cliente', label:'Cliente'},
+    {key:'nif', label:'NIF'},
+    {key:'tarifario', label:'Tarifário'},
+    {key:'contact', label:'Contacto', nosort:true},
+    {key:'localidade', label:'Localidade'},
+    {key:'fimDate', label:'Fim fidelização / estado'},
+    {key:'proxDate', label:'Próx. refidelização'},
+    {key:'estadoContato', label:'Estado do contacto'},
+    {key:'obs', label:'Observações', nosort:true},
+    {key:'actions', label:'', nosort:true},
+  ];
+
+  let editingRowNum = null;
+  let confirmingDeleteRowNum = null;
+  let creatingNew = false;
+
+  function toDateInputValue(dateObj, raw){
+    if(dateObj){
+      const y=dateObj.getFullYear(), m=String(dateObj.getMonth()+1).padStart(2,'0'), d=String(dateObj.getDate()).padStart(2,'0');
+      return `${y}-${m}-${d}`;
     }
-    return jsonOut({ ok: true, row: row, applied: applied });
-  } catch (err) {
-    return jsonOut({ ok: false, error: String(err) });
+    if(raw && /^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0,10);
+    return '';
   }
-}
 
-function formatCell(v) {
-  // Nota: evitamos Utilities.formatDate aqui de propósito — é uma chamada de
-  // serviço "pesada" e, repetida para milhares de células, torna o pedido
-  // lentíssimo (chegou a demorar mais de um minuto com ~15.500 linhas).
-  // Usamos apenas métodos nativos de Date, muito mais rápidos.
-  if (Object.prototype.toString.call(v) === '[object Date]') {
-    var y = v.getFullYear();
-    var m = ('0' + (v.getMonth() + 1)).slice(-2);
-    var d = ('0' + v.getDate()).slice(-2);
-    return y + '-' + m + '-' + d;
+  function rowHtml(r, mode){
+    // mode: 'view' | 'edit' | 'delete'
+    const badgeClass = r.status==='atrasado'?'critical':r.status==='alerta'?'warning':r.status==='futuro'?'good':'muted';
+    const rowClass = 'row-'+badgeClass + (mode==='edit'?' editing':'') + (mode==='delete'?' deleting':'');
+    if(mode!=='edit'){
+      const contactBits = [r.contato, r.telemovel, r.email].filter(Boolean);
+      const actionsHtml = mode==='delete'
+        ? `<div class="delete-confirm">Apagar este cliente da folha? Não pode ser desfeito.</div>
+           <button class="delete-confirm-btn" type="button">Sim, apagar</button>
+           <button class="delete-cancel-btn" type="button">Cancelar</button>`
+        : `<button class="proposta-btn" type="button">Proposta Cliente</button>
+           <button class="edit-row-btn" type="button">Editar</button>
+           <button class="delete-row-btn" type="button">Apagar</button>`;
+      return `<tr class="${rowClass}" data-row="${r.rowNum}">
+        <td class="cliente">${esc(r.cliente)}</td>
+        <td>${esc(r.nif||'—')}</td>
+        <td>${esc(r.tarifario||'—')}</td>
+        <td class="contact">${contactBits.map(c=>`<div>${esc(c)}</div>`).join('') || '—'}</td>
+        <td>${esc(r.localidade||'—')}</td>
+        <td class="dates">
+          <span class="badge ${badgeClass}"><span class="ico"></span>${esc(r.statusLabel)}</span>
+          <span class="days">${r.fimDate? fmtDate(r.fimDate) : ''}</span>
+        </td>
+        <td class="dates">${r.proxDate? fmtDate(r.proxDate) : esc(r.proxRaw||'—')}</td>
+        <td class="estado">${r.estadoContato
+          ? `<span class="estado-pill">${esc(r.estadoContato)}</span><span class="estado-date">${r.estadoData? fmtDate(parseISO(r.estadoData)) : ''}</span>`
+          : '—'}</td>
+        <td class="obs"><div class="obs-text">${esc(r.observacoes||'—')}</div></td>
+        <td class="actions">${actionsHtml}</td>
+      </tr>`;
+    }
+    const fimVal = toDateInputValue(r.fimDate, r.fimRaw);
+    const proxVal = toDateInputValue(r.proxDate, r.proxRaw);
+    const estadoOptionsHtml = ['<option value="">Sem estado</option>']
+      .concat(ESTADO_OPTIONS.map(opt=>`<option value="${esc(opt)}"${r.estadoContato===opt?' selected':''}>${esc(opt)}</option>`))
+      .join('');
+    return `<tr class="${rowClass}" data-row="${r.rowNum}">
+      <td><input type="text" class="f-cliente" value="${esc(r.cliente)}"></td>
+      <td><input type="text" class="f-nif" value="${esc(r.nif)}"></td>
+      <td><input type="text" class="f-tarifario" value="${esc(r.tarifario)}"></td>
+      <td class="contact-edit">
+        <input type="text" class="f-contato" placeholder="Contacto" value="${esc(r.contato)}">
+        <input type="text" class="f-telemovel" placeholder="Telemóvel" value="${esc(r.telemovel)}">
+        <input type="text" class="f-email" placeholder="E-mail" value="${esc(r.email)}">
+      </td>
+      <td><input type="text" class="f-localidade" value="${esc(r.localidade)}"></td>
+      <td><input type="date" class="f-fim" value="${fimVal}"></td>
+      <td><input type="date" class="f-prox" value="${proxVal}"></td>
+      <td><select class="f-estado">${estadoOptionsHtml}</select></td>
+      <td><textarea class="f-obs">${esc(r.observacoes==='—'?'':r.observacoes)}</textarea></td>
+      <td class="actions">
+        <button class="save-row-btn" type="button">Guardar</button>
+        <button class="cancel-row-btn" type="button">Cancelar</button>
+      </td>
+    </tr>`;
   }
-  return v;
-}
 
-function jsonOut(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj))
-    .setMimeType(ContentService.MimeType.JSON);
-}
+  function newRecordRowHtml(){
+    const estadoOptionsHtml = ['<option value="">Sem estado</option>']
+      .concat(ESTADO_OPTIONS.map(opt=>`<option value="${esc(opt)}">${esc(opt)}</option>`))
+      .join('');
+    return `<tr class="row-good new-record">
+      <td><input type="text" class="nf-cliente" placeholder="Nome do cliente"></td>
+      <td><input type="text" class="nf-nif" placeholder="NIF"></td>
+      <td><input type="text" class="nf-tarifario" placeholder="Tarifário"></td>
+      <td class="contact-edit">
+        <input type="text" class="nf-contato" placeholder="Contacto">
+        <input type="text" class="nf-telemovel" placeholder="Telemóvel">
+        <input type="text" class="nf-email" placeholder="E-mail">
+      </td>
+      <td><input type="text" class="nf-localidade" placeholder="Localidade"></td>
+      <td><input type="date" class="nf-fim"></td>
+      <td><input type="date" class="nf-prox"></td>
+      <td><select class="nf-estado">${estadoOptionsHtml}</select></td>
+      <td><textarea class="nf-obs" placeholder="Observações"></textarea></td>
+      <td class="actions">
+        <button class="create-save-btn" type="button">Guardar</button>
+        <button class="create-cancel-btn" type="button">Cancelar</button>
+      </td>
+    </tr>`;
+  }
+
+  function render(){
+    const tableWrap = document.getElementById('tableWrap');
+    const summaryLine = document.getElementById('summaryLine');
+    summaryLine.textContent = `${filtered.length.toLocaleString('pt-PT')} resultado(s) encontrados de ${records.length.toLocaleString('pt-PT')}.`;
+    const start = (page-1)*pageSize;
+    const pageRows = filtered.slice(start, start+pageSize);
+
+    if(pageRows.length===0 && !creatingNew){
+      tableWrap.innerHTML = '<div class="empty">Sem resultados para os filtros aplicados.</div>';
+    } else {
+      let thead = '<thead><tr>' + columns.map(c=>{
+        const sorted = sortKey===c.key || (sortKey==='days' && c.key==='fimDate');
+        return `<th ${c.nosort?'':'data-key="'+c.key+'"'} class="${sorted?'sorted':''}">${c.label}${sorted? (sortDir===1?' ▲':' ▼'):''}</th>`;
+      }).join('') + '</tr></thead>';
+
+      let tbody = '<tbody>' + (creatingNew ? newRecordRowHtml() : '') + pageRows.map(r=>{
+        const mode = r.rowNum===editingRowNum ? 'edit' : (r.rowNum===confirmingDeleteRowNum ? 'delete' : 'view');
+        return rowHtml(r, mode);
+      }).join('') + '</tbody>';
+
+      tableWrap.innerHTML = `<table>${thead}${tbody}</table>`;
+
+      if(creatingNew){
+        const newTr = tableWrap.querySelector('tr.new-record');
+        newTr.querySelector('.nf-cliente').focus();
+        newTr.querySelector('.create-cancel-btn').addEventListener('click', ()=>{ creatingNew = false; render(); });
+        newTr.querySelector('.create-save-btn').addEventListener('click', (e)=> createRecord(newTr, e.currentTarget));
+      }
+
+      tableWrap.querySelectorAll('th[data-key]').forEach(th=>{
+        th.addEventListener('click', ()=>{
+          const key = th.getAttribute('data-key');
+          const mapKey = key==='fimDate' ? 'days' : key;
+          if(sortKey===mapKey){ sortDir*=-1; } else { sortKey=mapKey; sortDir=1; }
+          sortRecords(); render();
+        });
+      });
+
+      tableWrap.querySelectorAll('.proposta-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const rowNum = +btn.closest('tr').getAttribute('data-row');
+          const rec = records.find(r=>r.rowNum===rowNum);
+          if(rec) openProposalModal(rec);
+        });
+      });
+      tableWrap.querySelectorAll('.edit-row-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          editingRowNum = +btn.closest('tr').getAttribute('data-row');
+          confirmingDeleteRowNum = null;
+          render();
+        });
+      });
+      tableWrap.querySelectorAll('.cancel-row-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ editingRowNum = null; render(); });
+      });
+      tableWrap.querySelectorAll('.save-row-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const tr = btn.closest('tr');
+          const rowNum = +tr.getAttribute('data-row');
+          saveRow(rowNum, tr, btn);
+        });
+      });
+      tableWrap.querySelectorAll('.delete-row-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          confirmingDeleteRowNum = +btn.closest('tr').getAttribute('data-row');
+          editingRowNum = null;
+          render();
+        });
+      });
+      tableWrap.querySelectorAll('.delete-cancel-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ confirmingDeleteRowNum = null; render(); });
+      });
+      tableWrap.querySelectorAll('.delete-confirm-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const tr = btn.closest('tr');
+          const rowNum = +tr.getAttribute('data-row');
+          deleteRow(rowNum, tr, btn);
+        });
+      });
+    }
+
+    const totalPages = Math.max(1, Math.ceil(filtered.length/pageSize));
+    document.getElementById('pageInfo').textContent = `Página ${page} de ${totalPages} — a mostrar ${pageRows.length? start+1:0}–${start+pageRows.length} de ${filtered.length.toLocaleString('pt-PT')}`;
+    document.getElementById('prevPage').disabled = page<=1;
+    document.getElementById('nextPage').disabled = page>=totalPages;
+  }
+
+  function saveRow(rowNum, tr, btn){
+    const val = sel => tr.querySelector(sel).value;
+    const cliente = val('.f-cliente').trim();
+    const nif = val('.f-nif').trim();
+    const tarifario = val('.f-tarifario').trim();
+    const contato = val('.f-contato').trim();
+    const telemovel = val('.f-telemovel').trim();
+    const email = val('.f-email').trim();
+    const localidade = val('.f-localidade').trim();
+    const fim = val('.f-fim');
+    const prox = val('.f-prox');
+    const estadoContato = val('.f-estado');
+    const observacoes = tr.querySelector('.f-obs').value;
+
+    btn.disabled = true;
+    btn.textContent = 'A guardar…';
+    const cancelBtn = tr.querySelector('.cancel-row-btn');
+    if(cancelBtn) cancelBtn.disabled = true;
+    setSyncState('saving');
+
+    const rec = records.find(r=>r.rowNum===rowNum);
+    // Só grava uma nova data quando o "Estado do contacto" realmente muda —
+    // assim a data reflete o dia em que a opção foi escolhida, não o dia da gravação.
+    const estadoChanged = rec && rec.estadoContato !== estadoContato;
+    const estadoData = estadoChanged ? (estadoContato ? todayISO() : '') : (rec? rec.estadoData : '');
+
+    const updates = {
+      G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
+      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes
+    };
+
+    fetch(API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ token: TOKEN, row: rowNum, updates })
+    }).then(r=>r.json()).then(res=>{
+      if(!res.ok){ throw new Error(res.error||'erro'); }
+      if(rec){
+        rec.cliente = cliente; rec.nif = nif; rec.tarifario = tarifario; rec.tarifNorm = tarifario.toUpperCase();
+        rec.contato = contato; rec.telemovel = telemovel; rec.email = email; rec.localidade = localidade;
+        rec.observacoes = observacoes;
+        rec.estadoContato = estadoContato; rec.estadoData = estadoData;
+        rec.fimRaw = fim || null; rec.fimDate = parseISO(fim);
+        rec.proxRaw = prox || null; rec.proxDate = parseISO(prox);
+        const days = rec.fimDate ? Math.round((rec.fimDate - today)/86400000) : Infinity;
+        const s = statusFromDays(days, rec.fimRaw);
+        rec.days = days; rec.status = s.status; rec.statusLabel = s.statusLabel;
+        rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
+      }
+      editingRowNum = null;
+      setSyncState('ok');
+      populateFilterOptions();
+      renderTiles();
+      renderEstadoChips();
+      applyFilters();
+    }).catch(err=>{
+      setSyncState('error');
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      if(cancelBtn) cancelBtn.disabled = false;
+      let flag = tr.querySelector('.save-flag');
+      if(!flag){
+        flag = document.createElement('span');
+        flag.className = 'save-flag error';
+        tr.querySelector('.actions').appendChild(flag);
+      }
+      flag.textContent = 'Falha ao guardar: ' + err.message;
+    });
+  }
+
+  function deleteRow(rowNum, tr, btn){
+    btn.disabled = true;
+    btn.textContent = 'A apagar…';
+    const cancelBtn = tr.querySelector('.delete-cancel-btn');
+    if(cancelBtn) cancelBtn.disabled = true;
+    setSyncState('saving');
+
+    fetch(API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ token: TOKEN, row: rowNum, action: 'delete' })
+    }).then(r=>r.json()).then(res=>{
+      if(!res.ok){ throw new Error(res.error||'erro'); }
+      // A linha foi removida na folha, o que faz subir uma posição a todas as
+      // linhas seguintes — atualizamos os rowNum em memória para se manterem
+      // corretos sem precisar de recarregar tudo.
+      records = records.filter(r=>r.rowNum!==rowNum);
+      records.forEach(r=>{ if(r.rowNum > rowNum) r.rowNum -= 1; });
+      confirmingDeleteRowNum = null;
+      setSyncState('ok');
+      populateFilterOptions();
+      renderTiles();
+      renderEstadoChips();
+      applyFilters();
+    }).catch(err=>{
+      setSyncState('error');
+      btn.disabled = false;
+      btn.textContent = 'Sim, apagar';
+      if(cancelBtn) cancelBtn.disabled = false;
+      let flag = tr.querySelector('.save-flag');
+      if(!flag){
+        flag = document.createElement('span');
+        flag.className = 'save-flag error';
+        tr.querySelector('.actions').appendChild(flag);
+      }
+      flag.textContent = 'Falha ao apagar: ' + err.message;
+    });
+  }
+
+  function createRecord(tr, btn){
+    const val = sel => tr.querySelector(sel).value;
+    const cliente = val('.nf-cliente').trim();
+    const nif = val('.nf-nif').trim();
+    const tarifario = val('.nf-tarifario').trim();
+    const contato = val('.nf-contato').trim();
+    const telemovel = val('.nf-telemovel').trim();
+    const email = val('.nf-email').trim();
+    const localidade = val('.nf-localidade').trim();
+    const fim = val('.nf-fim');
+    const prox = val('.nf-prox');
+    const estadoContato = val('.nf-estado');
+    const observacoes = tr.querySelector('.nf-obs').value;
+
+    if(!cliente){
+      let flag = tr.querySelector('.save-flag');
+      if(!flag){
+        flag = document.createElement('span');
+        flag.className = 'save-flag error';
+        tr.querySelector('.actions').appendChild(flag);
+      }
+      flag.textContent = 'Indica pelo menos o nome do cliente.';
+      tr.querySelector('.nf-cliente').focus();
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'A guardar…';
+    const cancelBtn = tr.querySelector('.create-cancel-btn');
+    if(cancelBtn) cancelBtn.disabled = true;
+    setSyncState('saving');
+
+    const estadoData = estadoContato ? todayISO() : '';
+    const values = {
+      G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
+      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes
+    };
+
+    fetch(API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ token: TOKEN, action: 'create', values })
+    }).then(r=>r.json()).then(res=>{
+      if(!res.ok){ throw new Error(res.error||'erro'); }
+      const fimDate = parseISO(fim);
+      const proxDate = parseISO(prox);
+      const days = fimDate ? Math.round((fimDate - today)/86400000) : Infinity;
+      const s = statusFromDays(days, fim);
+      const rec = {
+        rowNum: res.row,
+        cliente, nif, subagente: '',
+        tarifario, tarifNorm: tarifario.toUpperCase(),
+        localidade, contato, email, telemovel, observacoes,
+        estadoContato, estadoData,
+        fimDate, fimRaw: fim || null, proxDate, proxRaw: prox || null,
+        status: s.status, statusLabel: s.statusLabel, days
+      };
+      rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
+      records.unshift(rec);
+      creatingNew = false;
+      setSyncState('ok');
+      populateFilterOptions();
+      renderTiles();
+      renderEstadoChips();
+      applyFilters();
+    }).catch(err=>{
+      setSyncState('error');
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      if(cancelBtn) cancelBtn.disabled = false;
+      let flag = tr.querySelector('.save-flag');
+      if(!flag){
+        flag = document.createElement('span');
+        flag.className = 'save-flag error';
+        tr.querySelector('.actions').appendChild(flag);
+      }
+      flag.textContent = 'Falha ao guardar: ' + err.message;
+    });
+  }
+
+  // ---------- Proposta ao cliente ----------
+  const PROPOSTAS_CATALOG = JSON.parse(document.getElementById('propostas-data').textContent);
+  const PROPOSTAS_NAMES = Object.keys(PROPOSTAS_CATALOG).sort((a,b)=>a.localeCompare(b,'pt'));
+  let proposalRec = null;
+
+  function openProposalModal(rec){
+    proposalRec = rec;
+    document.getElementById('proposalTitle').textContent = `Proposta para ${rec.cliente}`;
+    document.getElementById('proposalTemplateSelect').value = '';
+    document.getElementById('proposalGridWrap').innerHTML = '';
+    document.getElementById('proposalSendBtn').disabled = true;
+    document.getElementById('proposalSendBtn').textContent = 'Enviar por e-mail ao cliente';
+    setProposalStatus('');
+    document.getElementById('proposalOverlay').classList.remove('hidden');
+  }
+
+  function closeProposalModal(){
+    document.getElementById('proposalOverlay').classList.add('hidden');
+    proposalRec = null;
+  }
+
+  function setProposalStatus(msg, kind){
+    const el = document.getElementById('proposalStatus');
+    el.textContent = msg || '';
+    el.className = 'proposal-status' + (kind ? ' '+kind : '');
+  }
+
+  function renderProposalGrid(sheetName){
+    const wrap = document.getElementById('proposalGridWrap');
+    const sendBtn = document.getElementById('proposalSendBtn');
+    if(!sheetName || !PROPOSTAS_CATALOG[sheetName]){
+      wrap.innerHTML = '';
+      sendBtn.disabled = true;
+      return;
+    }
+    // Clona os dados do modelo — nunca alteramos o catálogo original.
+    const grid = PROPOSTAS_CATALOG[sheetName].map(row=>row.slice());
+
+    // Os modelos trazem morada/nº de conta de quem os criou originalmente —
+    // substituímos pela morada deste cliente e limpamos o nº de conta, para
+    // não enviar por engano dados de outro cliente.
+    grid.forEach(row=>{
+      const label = (row[0]||'').trim().toUpperCase();
+      if(label.indexOf('MORADA')===0){
+        row[1] = proposalRec.morada || proposalRec.localidade || row[1] || '';
+      } else if(label.indexOf('CONTA')>-1){
+        row[1] = '';
+      }
+    });
+
+    const table = document.createElement('table');
+    table.className = 'proposal-grid';
+    grid.forEach((row, r)=>{
+      const tr = document.createElement('tr');
+      row.forEach((val, c)=>{
+        const td = document.createElement('td');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = val;
+        input.dataset.r = r; input.dataset.c = c;
+        td.appendChild(input);
+        tr.appendChild(td);
+      });
+      table.appendChild(tr);
+    });
+    wrap.innerHTML = '';
+    wrap.appendChild(table);
+    sendBtn.disabled = false;
+    setProposalStatus('');
+  }
+
+  function proposalGridToHtml(){
+    const wrap = document.getElementById('proposalGridWrap');
+    const inputs = wrap.querySelectorAll('input');
+    const rowsMap = {};
+    inputs.forEach(inp=>{
+      const r = +inp.dataset.r, c = +inp.dataset.c;
+      if(!rowsMap[r]) rowsMap[r] = [];
+      rowsMap[r][c] = inp.value;
+    });
+    const rowIndexes = Object.keys(rowsMap).map(Number).sort((a,b)=>a-b);
+    let html = '<table style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;">';
+    rowIndexes.forEach(r=>{
+      html += '<tr>';
+      (rowsMap[r]||[]).forEach(val=>{
+        html += `<td style="padding:4px 8px;border:1px solid #ddd;">${esc(val||'')}</td>`;
+      });
+      html += '</tr>';
+    });
+    html += '</table>';
+    return html;
+  }
+
+  function sendProposal(){
+    if(!proposalRec) return;
+    const sheetName = document.getElementById('proposalTemplateSelect').value;
+    if(!sheetName){ setProposalStatus('Escolhe primeiro um tarifário.', 'error'); return; }
+    if(!proposalRec.email){ setProposalStatus('Este cliente não tem e-mail registado — preenche o e-mail antes de enviar.', 'error'); return; }
+
+    const sendBtn = document.getElementById('proposalSendBtn');
+    sendBtn.disabled = true;
+    sendBtn.textContent = 'A enviar…';
+    setProposalStatus('A enviar…');
+
+    const html = proposalGridToHtml();
+    const subject = `Proposta ${sheetName} — ${proposalRec.cliente}`;
+
+    fetch(API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ token: TOKEN, action:'sendProposal', to: proposalRec.email, subject, html })
+    }).then(r=>r.json()).then(res=>{
+      if(!res.ok){ throw new Error(res.error||'erro'); }
+      setProposalStatus('Proposta enviada para ' + proposalRec.email + '.', 'ok');
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Enviar por e-mail ao cliente';
+    }).catch(err=>{
+      setProposalStatus('Falha ao enviar: ' + err.message, 'error');
+      sendBtn.disabled = false;
+      sendBtn.textContent = 'Enviar por e-mail ao cliente';
+    });
+  }
+
+  function exportXls(){
+    const headers = ['Cliente','NIF','Tarifário','Subagente','Contacto','Telemóvel','E-mail','Localidade','Fim de fidelização','Estado da fidelização','Próxima refidelização','Estado do contacto','Data do estado','Observações'];
+    const aoa = [headers];
+    filtered.forEach(r=>{
+      aoa.push([r.cliente,r.nif,r.tarifario,r.subagente,r.contato,r.telemovel,r.email,r.localidade,
+        r.fimDate? fmtDate(r.fimDate): (r.fimRaw||''), r.statusLabel,
+        r.proxDate? fmtDate(r.proxDate): (r.proxRaw||''),
+        r.estadoContato||'', r.estadoData? fmtDate(parseISO(r.estadoData)): '',
+        r.observacoes]);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = headers.map((h,i)=>{
+      let max = h.length;
+      aoa.forEach(row=>{ const v = row[i]; if(v!=null){ max = Math.max(max, String(v).length); } });
+      return { wch: Math.min(Math.max(max+2, 10), 45) };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Fidelizações');
+    const stamp = new Date();
+    const y = stamp.getFullYear(), m = String(stamp.getMonth()+1).padStart(2,'0'), d = String(stamp.getDate()).padStart(2,'0');
+    XLSX.writeFile(wb, `fidelizacoes_filtrado_${y}${m}${d}.xlsx`);
+  }
+})();
+</script>
+</body>
+</html>
