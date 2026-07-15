@@ -73,6 +73,15 @@ h1{font-size:20px; margin:0 0 4px;}
 }
 .field input:focus, .field select:focus{outline:2px solid var(--blue); outline-offset:1px;}
 #search{min-width:260px;}
+.estado-chips{display:flex; gap:6px; flex-wrap:wrap; align-items:center; height:34px;}
+.estado-chip{
+  font-size:12px; padding:0 10px; height:34px; border-radius:8px; border:1px solid var(--baseline);
+  background:var(--surface-1); color:var(--text-primary); cursor:pointer; white-space:nowrap;
+  display:inline-flex; align-items:center; gap:5px;
+}
+.estado-chip:hover{background:var(--muted-bg);}
+.estado-chip.active{background:var(--blue); border-color:var(--blue); color:#fff;}
+.estado-chip .n{font-variant-numeric:tabular-nums; opacity:.75; font-size:11px;}
 .btn{
   border:1px solid var(--baseline); background:var(--surface-1); color:var(--text-primary);
   border-radius:8px; padding:8px 14px; font-size:13px; cursor:pointer; height:34px;
@@ -113,7 +122,7 @@ td.estado{white-space:nowrap; font-size:12.5px;}
 }
 .estado-date{display:block; font-size:11px; color:var(--text-muted); margin-top:3px;}
 
-tr.editing{background:var(--blue-bg);}
+tr.editing, tr.new-record{background:var(--blue-bg);}
 td input[type=text], td input[type=date], td select{
   width:100%; padding:5px 7px; border:1px solid var(--baseline); border-radius:6px;
   font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary);
@@ -196,6 +205,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
         <h1>Gestão de Fidelizações</h1>
       </div>
       <div style="display:flex; gap:8px;">
+        <button class="btn primary" id="newRecordBtn">+ Novo cliente</button>
         <button class="btn" id="refreshBtn">↻ Atualizar</button>
         <button class="theme-toggle" id="themeToggle">🌓 Tema</button>
       </div>
@@ -228,11 +238,8 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
         <datalist id="subList"></datalist>
       </div>
       <div class="field">
-        <label for="estadoContatoFilter">Estado do contacto</label>
-        <select id="estadoContatoFilter">
-          <option value="">Todos</option>
-          <option value="__vazio__">Sem estado</option>
-        </select>
+        <label>Estado do contacto</label>
+        <div class="estado-chips" id="estadoContatoChips"></div>
       </div>
       <button class="btn" id="clearFilters">Limpar filtros</button>
       <button class="btn primary" id="exportCsv">Exportar ficheiro XLS (filtrado)</button>
@@ -429,25 +436,24 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
   document.getElementById('refreshBtn').addEventListener('click', ()=>loadData(false));
 
   // ---------- App ----------
-  let tarifSelEl, subListEl, tilesWrap, activeStatus = '';
+  let tarifSelEl, subListEl, tilesWrap, estadoChipsWrap, activeStatus = '', activeEstadoFilter = '';
   const tilesDef = [
     {key:'atrasado', label:'Atrasado', dot:'critical', desc:'já passou a data'},
     {key:'alerta', label:'Em alerta', dot:'warning', desc:`dentro de ${ALERT_WINDOW_DAYS} dias`},
     {key:'futuro', label:'Futuro', dot:'good', desc:`além de ${ALERT_WINDOW_DAYS} dias`},
     {key:'outro', label:'Sem fidelização / outro', dot:'muted', desc:'sem data associada'},
   ];
+  const estadoChipsDef = [
+    {value:'', label:'Todos'},
+    ...ESTADO_OPTIONS.map(opt=>({value:opt, label:opt})),
+    {value:'__vazio__', label:'Sem estado'},
+  ];
 
   function initApp(){
     tarifSelEl = document.getElementById('tarifFilter');
     subListEl = document.getElementById('subList');
     tilesWrap = document.getElementById('tiles');
-
-    const estadoFilterEl = document.getElementById('estadoContatoFilter');
-    ESTADO_OPTIONS.forEach(opt=>{
-      const o = document.createElement('option');
-      o.value = opt; o.textContent = opt;
-      estadoFilterEl.appendChild(o);
-    });
+    estadoChipsWrap = document.getElementById('estadoContatoChips');
 
     populateFilterOptions();
 
@@ -455,14 +461,13 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     document.getElementById('statusFilter').addEventListener('change', applyFilters);
     tarifSelEl.addEventListener('change', applyFilters);
     document.getElementById('subFilter').addEventListener('input', debounce(applyFilters,150));
-    estadoFilterEl.addEventListener('change', applyFilters);
     document.getElementById('clearFilters').addEventListener('click', ()=>{
       document.getElementById('search').value='';
       document.getElementById('statusFilter').value='';
       tarifSelEl.value='';
       document.getElementById('subFilter').value='';
-      estadoFilterEl.value='';
       activeStatus='';
+      activeEstadoFilter='';
       applyFilters();
     });
     document.getElementById('prevPage').addEventListener('click', ()=>{ if(page>1){page--; render();} });
@@ -471,6 +476,13 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
       if(page<totalPages){page++; render();}
     });
     document.getElementById('exportCsv').addEventListener('click', exportXls);
+    document.getElementById('newRecordBtn').addEventListener('click', ()=>{
+      creatingNew = true;
+      editingRowNum = null;
+      confirmingDeleteRowNum = null;
+      page = 1;
+      render();
+    });
     document.getElementById('themeToggle').addEventListener('click', ()=>{
       const cur = document.documentElement.getAttribute('data-theme');
       document.documentElement.setAttribute('data-theme', cur==='dark' ? 'light' : 'dark');
@@ -478,6 +490,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
 
     filtered = records.slice();
     renderTiles();
+    renderEstadoChips();
     sortRecords();
     render();
   }
@@ -522,25 +535,46 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     });
   }
 
+  function renderEstadoChips(){
+    const counts = { '': records.length, '__vazio__': 0 };
+    ESTADO_OPTIONS.forEach(opt=>{ counts[opt] = 0; });
+    records.forEach(r=>{
+      if(r.estadoContato){ counts[r.estadoContato] = (counts[r.estadoContato]||0) + 1; }
+      else { counts['__vazio__']++; }
+    });
+    estadoChipsWrap.innerHTML = '';
+    estadoChipsDef.forEach(c=>{
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'estado-chip' + (activeEstadoFilter===c.value ? ' active' : '');
+      btn.innerHTML = `${esc(c.label)} <span class="n">${(counts[c.value]||0).toLocaleString('pt-PT')}</span>`;
+      btn.addEventListener('click', ()=>{
+        activeEstadoFilter = (activeEstadoFilter===c.value) ? '' : c.value;
+        applyFilters();
+      });
+      estadoChipsWrap.appendChild(btn);
+    });
+  }
+
   function applyFilters(){
     const q = stripAccents(document.getElementById('search').value.trim().toLowerCase());
     const st = document.getElementById('statusFilter').value;
     const tar = tarifSelEl.value;
     const sub = stripAccents(document.getElementById('subFilter').value.trim().toLowerCase());
-    const estadoFilter = document.getElementById('estadoContatoFilter').value;
     activeStatus = st;
     filtered = records.filter(r=>{
       if(q && !r.searchBlob.includes(q)) return false;
       if(st && r.status!==st) return false;
       if(tar && r.tarifNorm!==tar) return false;
       if(sub && !stripAccents((r.subagente||'').toLowerCase()).includes(sub)) return false;
-      if(estadoFilter==='__vazio__' && r.estadoContato) return false;
-      if(estadoFilter && estadoFilter!=='__vazio__' && r.estadoContato!==estadoFilter) return false;
+      if(activeEstadoFilter==='__vazio__' && r.estadoContato) return false;
+      if(activeEstadoFilter && activeEstadoFilter!=='__vazio__' && r.estadoContato!==activeEstadoFilter) return false;
       return true;
     });
     sortRecords();
     page = 1;
     renderTiles();
+    renderEstadoChips();
     render();
   }
 
@@ -572,12 +606,13 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     {key:'fimDate', label:'Fim fidelização / estado'},
     {key:'proxDate', label:'Próx. refidelização'},
     {key:'estadoContato', label:'Estado do contacto'},
-    {key:'obs', label:'Observações (col. Q)', nosort:true},
+    {key:'obs', label:'Observações', nosort:true},
     {key:'actions', label:'', nosort:true},
   ];
 
   let editingRowNum = null;
   let confirmingDeleteRowNum = null;
+  let creatingNew = false;
 
   function toDateInputValue(dateObj, raw){
     if(dateObj){
@@ -644,6 +679,31 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     </tr>`;
   }
 
+  function newRecordRowHtml(){
+    const estadoOptionsHtml = ['<option value="">Sem estado</option>']
+      .concat(ESTADO_OPTIONS.map(opt=>`<option value="${esc(opt)}">${esc(opt)}</option>`))
+      .join('');
+    return `<tr class="row-good new-record">
+      <td><input type="text" class="nf-cliente" placeholder="Nome do cliente"></td>
+      <td><input type="text" class="nf-nif" placeholder="NIF"></td>
+      <td><input type="text" class="nf-tarifario" placeholder="Tarifário"></td>
+      <td class="contact-edit">
+        <input type="text" class="nf-contato" placeholder="Contacto">
+        <input type="text" class="nf-telemovel" placeholder="Telemóvel">
+        <input type="text" class="nf-email" placeholder="E-mail">
+      </td>
+      <td><input type="text" class="nf-localidade" placeholder="Localidade"></td>
+      <td><input type="date" class="nf-fim"></td>
+      <td><input type="date" class="nf-prox"></td>
+      <td><select class="nf-estado">${estadoOptionsHtml}</select></td>
+      <td><textarea class="nf-obs" placeholder="Observações"></textarea></td>
+      <td class="actions">
+        <button class="create-save-btn" type="button">Guardar</button>
+        <button class="create-cancel-btn" type="button">Cancelar</button>
+      </td>
+    </tr>`;
+  }
+
   function render(){
     const tableWrap = document.getElementById('tableWrap');
     const summaryLine = document.getElementById('summaryLine');
@@ -651,7 +711,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     const start = (page-1)*pageSize;
     const pageRows = filtered.slice(start, start+pageSize);
 
-    if(pageRows.length===0){
+    if(pageRows.length===0 && !creatingNew){
       tableWrap.innerHTML = '<div class="empty">Sem resultados para os filtros aplicados.</div>';
     } else {
       let thead = '<thead><tr>' + columns.map(c=>{
@@ -659,12 +719,19 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
         return `<th ${c.nosort?'':'data-key="'+c.key+'"'} class="${sorted?'sorted':''}">${c.label}${sorted? (sortDir===1?' ▲':' ▼'):''}</th>`;
       }).join('') + '</tr></thead>';
 
-      let tbody = '<tbody>' + pageRows.map(r=>{
+      let tbody = '<tbody>' + (creatingNew ? newRecordRowHtml() : '') + pageRows.map(r=>{
         const mode = r.rowNum===editingRowNum ? 'edit' : (r.rowNum===confirmingDeleteRowNum ? 'delete' : 'view');
         return rowHtml(r, mode);
       }).join('') + '</tbody>';
 
       tableWrap.innerHTML = `<table>${thead}${tbody}</table>`;
+
+      if(creatingNew){
+        const newTr = tableWrap.querySelector('tr.new-record');
+        newTr.querySelector('.nf-cliente').focus();
+        newTr.querySelector('.create-cancel-btn').addEventListener('click', ()=>{ creatingNew = false; render(); });
+        newTr.querySelector('.create-save-btn').addEventListener('click', (e)=> createRecord(newTr, e.currentTarget));
+      }
 
       tableWrap.querySelectorAll('th[data-key]').forEach(th=>{
         th.addEventListener('click', ()=>{
@@ -819,6 +886,84 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
         tr.querySelector('.actions').appendChild(flag);
       }
       flag.textContent = 'Falha ao apagar: ' + err.message;
+    });
+  }
+
+  function createRecord(tr, btn){
+    const val = sel => tr.querySelector(sel).value;
+    const cliente = val('.nf-cliente').trim();
+    const nif = val('.nf-nif').trim();
+    const tarifario = val('.nf-tarifario').trim();
+    const contato = val('.nf-contato').trim();
+    const telemovel = val('.nf-telemovel').trim();
+    const email = val('.nf-email').trim();
+    const localidade = val('.nf-localidade').trim();
+    const fim = val('.nf-fim');
+    const prox = val('.nf-prox');
+    const estadoContato = val('.nf-estado');
+    const observacoes = tr.querySelector('.nf-obs').value;
+
+    if(!cliente){
+      let flag = tr.querySelector('.save-flag');
+      if(!flag){
+        flag = document.createElement('span');
+        flag.className = 'save-flag error';
+        tr.querySelector('.actions').appendChild(flag);
+      }
+      flag.textContent = 'Indica pelo menos o nome do cliente.';
+      tr.querySelector('.nf-cliente').focus();
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'A guardar…';
+    const cancelBtn = tr.querySelector('.create-cancel-btn');
+    if(cancelBtn) cancelBtn.disabled = true;
+    setSyncState('saving');
+
+    const estadoData = estadoContato ? todayISO() : '';
+    const values = {
+      G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
+      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes
+    };
+
+    fetch(API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ token: TOKEN, action: 'create', values })
+    }).then(r=>r.json()).then(res=>{
+      if(!res.ok){ throw new Error(res.error||'erro'); }
+      const fimDate = parseISO(fim);
+      const proxDate = parseISO(prox);
+      const days = fimDate ? Math.round((fimDate - today)/86400000) : Infinity;
+      const s = statusFromDays(days, fim);
+      const rec = {
+        rowNum: res.row,
+        cliente, nif, subagente: '',
+        tarifario, tarifNorm: tarifario.toUpperCase(),
+        localidade, contato, email, telemovel, observacoes,
+        estadoContato, estadoData,
+        fimDate, fimRaw: fim || null, proxDate, proxRaw: prox || null,
+        status: s.status, statusLabel: s.statusLabel, days
+      };
+      rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
+      records.unshift(rec);
+      creatingNew = false;
+      setSyncState('ok');
+      populateFilterOptions();
+      applyFilters();
+    }).catch(err=>{
+      setSyncState('error');
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      if(cancelBtn) cancelBtn.disabled = false;
+      let flag = tr.querySelector('.save-flag');
+      if(!flag){
+        flag = document.createElement('span');
+        flag.className = 'save-flag error';
+        tr.querySelector('.actions').appendChild(flag);
+      }
+      flag.textContent = 'Falha ao guardar: ' + err.message;
     });
   }
 
