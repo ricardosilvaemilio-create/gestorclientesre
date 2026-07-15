@@ -127,6 +127,9 @@ td input[type=text], td input[type=date], td select{
   width:100%; padding:5px 7px; border:1px solid var(--baseline); border-radius:6px;
   font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary);
 }
+td input[readonly]{
+  background:var(--surface-2, #eee); color:var(--text-muted); cursor:not-allowed;
+}
 td textarea{
   width:100%; min-height:60px; border:1px solid var(--blue); border-radius:6px; padding:6px;
   font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary); resize:vertical;
@@ -428,7 +431,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function paramsFromLocation(){
     const p = new URLSearchParams(location.search);
-    return { api: p.get('api')||'', token: p.get('token')||'' };
+        const DEFAULT_API = 'https://script.google.com/macros/s/AKfycbxwB1rlRKc12T1QzWFNZ_zcffOpkGONqLa4cNTucegLBjRKyNHlhekpH8BiR3Cng9Ua/exec';
+    const DEFAULT_TOKEN = 'vOJtAuuqkgE6_9Xo0hsOjjRm73-36jMi';
+    return { api: p.get('api')||DEFAULT_API, token: p.get('token')||DEFAULT_TOKEN };
   }
   const initial = paramsFromLocation();
   // Só pré-preenchemos os campos visíveis quando NÃO vamos ligar automaticamente —
@@ -781,7 +786,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       </td>
       <td><input type="text" class="f-localidade" value="${esc(r.localidade)}"></td>
       <td><input type="date" class="f-fim" value="${fimVal}"></td>
-      <td><input type="date" class="f-prox" value="${proxVal}"></td>
+      <td><input type="date" class="f-prox" value="${proxVal}" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização"></td>
       <td><select class="f-estado">${estadoOptionsHtml}</select></td>
       <td><textarea class="f-obs">${esc(r.observacoes==='—'?'':r.observacoes)}</textarea></td>
       <td class="actions">
@@ -806,7 +811,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       </td>
       <td><input type="text" class="nf-localidade" placeholder="Localidade"></td>
       <td><input type="date" class="nf-fim"></td>
-      <td><input type="date" class="nf-prox"></td>
+      <td><input type="date" class="nf-prox" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização"></td>
       <td><select class="nf-estado">${estadoOptionsHtml}</select></td>
       <td><textarea class="nf-obs" placeholder="Observações"></textarea></td>
       <td class="actions">
