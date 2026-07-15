@@ -111,16 +111,25 @@ td.obs{max-width:280px; color:var(--text-secondary); font-size:12.5px;}
 td.dates{white-space:nowrap; font-variant-numeric:tabular-nums; font-size:12.5px;}
 td.dates .days{display:block; font-size:11px; margin-top:2px;}
 
-.obs-text{white-space:pre-wrap; cursor:text; min-height:18px; border-radius:6px; padding:3px 5px; margin:-3px -5px;}
-.obs-text:hover{background:var(--muted-bg);}
-.obs-edit textarea{
+.obs-text{white-space:pre-wrap; min-height:18px; border-radius:6px; padding:3px 5px; margin:-3px -5px;}
+
+tr.editing{background:var(--blue-bg);}
+td input[type=text], td input[type=date]{
+  width:100%; padding:5px 7px; border:1px solid var(--baseline); border-radius:6px;
+  font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary);
+}
+td textarea{
   width:100%; min-height:60px; border:1px solid var(--blue); border-radius:6px; padding:6px;
   font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary); resize:vertical;
 }
-.obs-actions{display:flex; gap:6px; margin-top:4px;}
-.obs-actions button{font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--baseline); background:var(--surface-1); cursor:pointer;}
-.obs-actions button.save{background:var(--blue); color:#fff; border-color:var(--blue);}
-.save-flag{font-size:10.5px; color:var(--good); margin-left:6px;}
+.contact-edit{display:flex; flex-direction:column; gap:4px;}
+td.actions{white-space:nowrap;}
+.edit-row-btn, .save-row-btn, .cancel-row-btn{
+  font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--baseline);
+  background:var(--surface-1); cursor:pointer; display:block; width:100%; margin-bottom:4px;
+}
+.save-row-btn{background:var(--blue); color:#fff; border-color:var(--blue);}
+.save-flag{font-size:10.5px; color:var(--good); margin-left:6px; display:block; margin-top:4px;}
 .save-flag.error{color:var(--critical);}
 
 .badge{
@@ -552,7 +561,61 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     {key:'fimDate', label:'Fim fidelização / estado'},
     {key:'proxDate', label:'Próx. refidelização'},
     {key:'obs', label:'Observações (col. Q)', nosort:true},
+    {key:'actions', label:'', nosort:true},
   ];
+
+  let editingRowNum = null;
+
+  function toDateInputValue(dateObj, raw){
+    if(dateObj){
+      const y=dateObj.getFullYear(), m=String(dateObj.getMonth()+1).padStart(2,'0'), d=String(dateObj.getDate()).padStart(2,'0');
+      return `${y}-${m}-${d}`;
+    }
+    if(raw && /^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0,10);
+    return '';
+  }
+
+  function rowHtml(r, editing){
+    const badgeClass = r.status==='atrasado'?'critical':r.status==='alerta'?'warning':r.status==='futuro'?'good':'muted';
+    const rowClass = 'row-'+badgeClass + (editing?' editing':'');
+    if(!editing){
+      const contactBits = [r.contato, r.telemovel, r.email].filter(Boolean);
+      return `<tr class="${rowClass}" data-row="${r.rowNum}">
+        <td class="cliente">${esc(r.cliente)}</td>
+        <td>${esc(r.nif||'—')}</td>
+        <td>${esc(r.tarifario||'—')}</td>
+        <td class="contact">${contactBits.map(c=>`<div>${esc(c)}</div>`).join('') || '—'}</td>
+        <td>${esc(r.localidade||'—')}</td>
+        <td class="dates">
+          <span class="badge ${badgeClass}"><span class="ico"></span>${esc(r.statusLabel)}</span>
+          <span class="days">${r.fimDate? fmtDate(r.fimDate) : ''}</span>
+        </td>
+        <td class="dates">${r.proxDate? fmtDate(r.proxDate) : esc(r.proxRaw||'—')}</td>
+        <td class="obs"><div class="obs-text">${esc(r.observacoes||'—')}</div></td>
+        <td class="actions"><button class="edit-row-btn" type="button">Editar</button></td>
+      </tr>`;
+    }
+    const fimVal = toDateInputValue(r.fimDate, r.fimRaw);
+    const proxVal = toDateInputValue(r.proxDate, r.proxRaw);
+    return `<tr class="${rowClass}" data-row="${r.rowNum}">
+      <td><input type="text" class="f-cliente" value="${esc(r.cliente)}"></td>
+      <td><input type="text" class="f-nif" value="${esc(r.nif)}"></td>
+      <td><input type="text" class="f-tarifario" value="${esc(r.tarifario)}"></td>
+      <td class="contact-edit">
+        <input type="text" class="f-contato" placeholder="Contacto" value="${esc(r.contato)}">
+        <input type="text" class="f-telemovel" placeholder="Telemóvel" value="${esc(r.telemovel)}">
+        <input type="text" class="f-email" placeholder="E-mail" value="${esc(r.email)}">
+      </td>
+      <td><input type="text" class="f-localidade" value="${esc(r.localidade)}"></td>
+      <td><input type="date" class="f-fim" value="${fimVal}"></td>
+      <td><input type="date" class="f-prox" value="${proxVal}"></td>
+      <td><textarea class="f-obs">${esc(r.observacoes==='—'?'':r.observacoes)}</textarea></td>
+      <td class="actions">
+        <button class="save-row-btn" type="button">Guardar</button>
+        <button class="cancel-row-btn" type="button">Cancelar</button>
+      </td>
+    </tr>`;
+  }
 
   function render(){
     const tableWrap = document.getElementById('tableWrap');
@@ -569,24 +632,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
         return `<th ${c.nosort?'':'data-key="'+c.key+'"'} class="${sorted?'sorted':''}">${c.label}${sorted? (sortDir===1?' ▲':' ▼'):''}</th>`;
       }).join('') + '</tr></thead>';
 
-      let tbody = '<tbody>' + pageRows.map(r=>{
-        const badgeClass = r.status==='atrasado'?'critical':r.status==='alerta'?'warning':r.status==='futuro'?'good':'muted';
-        const rowClass = 'row-'+badgeClass;
-        const contactBits = [r.contato, r.telemovel, r.email].filter(Boolean);
-        return `<tr class="${rowClass}" data-row="${r.rowNum}">
-          <td class="cliente">${esc(r.cliente)}</td>
-          <td>${esc(r.nif||'—')}</td>
-          <td>${esc(r.tarifario||'—')}</td>
-          <td class="contact">${contactBits.map(c=>`<div>${esc(c)}</div>`).join('') || '—'}</td>
-          <td>${esc(r.localidade||'—')}</td>
-          <td class="dates">
-            <span class="badge ${badgeClass}"><span class="ico"></span>${esc(r.statusLabel)}</span>
-            <span class="days">${r.fimDate? fmtDate(r.fimDate) : ''}</span>
-          </td>
-          <td class="dates">${r.proxDate? fmtDate(r.proxDate) : esc(r.proxRaw||'—')}</td>
-          <td class="obs" data-row="${r.rowNum}"><div class="obs-text" tabindex="0">${esc(r.observacoes||'—')}</div></td>
-        </tr>`;
-      }).join('') + '</tbody>';
+      let tbody = '<tbody>' + pageRows.map(r=> rowHtml(r, r.rowNum===editingRowNum)).join('') + '</tbody>';
 
       tableWrap.innerHTML = `<table>${thead}${tbody}</table>`;
 
@@ -599,8 +645,21 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
         });
       });
 
-      tableWrap.querySelectorAll('.obs-text').forEach(el=>{
-        el.addEventListener('click', ()=> startEditObs(el));
+      tableWrap.querySelectorAll('.edit-row-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          editingRowNum = +btn.closest('tr').getAttribute('data-row');
+          render();
+        });
+      });
+      tableWrap.querySelectorAll('.cancel-row-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{ editingRowNum = null; render(); });
+      });
+      tableWrap.querySelectorAll('.save-row-btn').forEach(btn=>{
+        btn.addEventListener('click', ()=>{
+          const tr = btn.closest('tr');
+          const rowNum = +tr.getAttribute('data-row');
+          saveRow(rowNum, tr, btn);
+        });
       });
     }
 
@@ -610,57 +669,64 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     document.getElementById('nextPage').disabled = page>=totalPages;
   }
 
-  function startEditObs(el){
-    const td = el.closest('td');
-    const rowNum = +td.getAttribute('data-row');
-    const rec = records.find(r=>r.rowNum===rowNum);
-    const current = rec ? rec.observacoes : '';
-    const wrap = document.createElement('div');
-    wrap.className = 'obs-edit';
-    wrap.innerHTML = `<textarea>${esc(current==='—'?'':current)}</textarea>
-      <div class="obs-actions">
-        <button class="save">Guardar</button>
-        <button class="cancel">Cancelar</button>
-      </div>`;
-    td.innerHTML = '';
-    td.appendChild(wrap);
-    const ta = wrap.querySelector('textarea');
-    ta.focus();
-    wrap.querySelector('.cancel').addEventListener('click', ()=> render());
-    wrap.querySelector('.save').addEventListener('click', ()=> saveObs(rowNum, ta.value, td));
-  }
+  function saveRow(rowNum, tr, btn){
+    const val = sel => tr.querySelector(sel).value;
+    const cliente = val('.f-cliente').trim();
+    const nif = val('.f-nif').trim();
+    const tarifario = val('.f-tarifario').trim();
+    const contato = val('.f-contato').trim();
+    const telemovel = val('.f-telemovel').trim();
+    const email = val('.f-email').trim();
+    const localidade = val('.f-localidade').trim();
+    const fim = val('.f-fim');
+    const prox = val('.f-prox');
+    const observacoes = tr.querySelector('.f-obs').value;
 
-  function saveObs(rowNum, newValue, td){
-    const btn = td.querySelector('.save');
     btn.disabled = true;
     btn.textContent = 'A guardar…';
+    const cancelBtn = tr.querySelector('.cancel-row-btn');
+    if(cancelBtn) cancelBtn.disabled = true;
     setSyncState('saving');
+
+    const updates = {
+      G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
+      D: fim, C: prox, Q: observacoes
+    };
+
     fetch(API_URL, {
       method:'POST',
       headers:{'Content-Type':'text/plain;charset=utf-8'},
-      body: JSON.stringify({ token: TOKEN, row: rowNum, updates: { Q: newValue } })
+      body: JSON.stringify({ token: TOKEN, row: rowNum, updates })
     }).then(r=>r.json()).then(res=>{
       if(!res.ok){ throw new Error(res.error||'erro'); }
       const rec = records.find(r=>r.rowNum===rowNum);
       if(rec){
-        rec.observacoes = newValue;
+        rec.cliente = cliente; rec.nif = nif; rec.tarifario = tarifario; rec.tarifNorm = tarifario.toUpperCase();
+        rec.contato = contato; rec.telemovel = telemovel; rec.email = email; rec.localidade = localidade;
+        rec.observacoes = observacoes;
+        rec.fimRaw = fim || null; rec.fimDate = parseISO(fim);
+        rec.proxRaw = prox || null; rec.proxDate = parseISO(prox);
+        const days = rec.fimDate ? Math.round((rec.fimDate - today)/86400000) : Infinity;
+        const s = statusFromDays(days, rec.fimRaw);
+        rec.days = days; rec.status = s.status; rec.statusLabel = s.statusLabel;
         rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes).toLowerCase());
       }
+      editingRowNum = null;
       setSyncState('ok');
-      render();
+      populateFilterOptions();
+      applyFilters();
     }).catch(err=>{
       setSyncState('error');
-      td.innerHTML = '';
-      const div = document.createElement('div');
-      div.className='obs-text';
-      div.textContent = newValue || '—';
-      div.tabIndex=0;
-      const flag = document.createElement('span');
-      flag.className='save-flag error';
-      flag.textContent='Falha ao guardar: ' + err.message;
-      td.appendChild(div);
-      td.appendChild(flag);
-      div.addEventListener('click', ()=>startEditObs(div));
+      btn.disabled = false;
+      btn.textContent = 'Guardar';
+      if(cancelBtn) cancelBtn.disabled = false;
+      let flag = tr.querySelector('.save-flag');
+      if(!flag){
+        flag = document.createElement('span');
+        flag.className = 'save-flag error';
+        tr.querySelector('.actions').appendChild(flag);
+      }
+      flag.textContent = 'Falha ao guardar: ' + err.message;
     });
   }
 
