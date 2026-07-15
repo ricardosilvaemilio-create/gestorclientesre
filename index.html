@@ -175,7 +175,6 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     <header class="top">
       <div>
         <h1>Gestão de Fidelizações</h1>
-        <div class="subtitle" id="subtitle">a carregar…</div>
       </div>
       <div style="display:flex; gap:8px;">
         <button class="btn" id="refreshBtn">↻ Atualizar</button>
@@ -407,10 +406,6 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
     tilesWrap = document.getElementById('tiles');
 
     populateFilterOptions();
-
-    const totalClientes = new Set(records.map(r=>r.nif).filter(Boolean)).size;
-    document.getElementById('subtitle').textContent =
-      `${records.length.toLocaleString('pt-PT')} linhas de serviço · ${totalClientes.toLocaleString('pt-PT')} clientes únicos (NIF) · hoje: ${fmtDate(today)}`;
 
     document.getElementById('search').addEventListener('input', debounce(applyFilters,150));
     document.getElementById('statusFilter').addEventListener('change', applyFilters);
