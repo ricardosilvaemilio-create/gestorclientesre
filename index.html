@@ -415,9 +415,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function paramsFromLocation(){
     const p = new URLSearchParams(location.search);
-        const DEFAULT_API = 'https://script.google.com/macros/s/AKfycbxwB1rlRKc12T1QzWFNZ_zcffOpkGONqLa4cNTucegLBjRKyNHlhekpH8BiR3Cng9Ua/exec';
-    const DEFAULT_TOKEN = 'vOJtAuuqkgE6_9Xo0hsOjjRm73-36jMi';
-    return { api: p.get('api')||DEFAULT_API, token: p.get('token')||DEFAULT_TOKEN };
+    return { api: p.get('api')||'', token: p.get('token')||'' };
   }
   const initial = paramsFromLocation();
   // Só pré-preenchemos os campos visíveis quando NÃO vamos ligar automaticamente —
@@ -1137,6 +1135,45 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         row[1] = '';
       }
     });
+
+    // O modelo Excel traz o nome do tarifário "atual" e "proposto" escrito
+    // à mão (varia de modelo para modelo: "ATUALMENTE X", "TARIFARIO ATUAL Y",
+    // etc.) — isso pode não bater certo com os dados reais do cliente. Aqui
+    // localizamos essa linha de cabeçalho e substituímos sempre pelo tarifário
+    // que consta na coluna "Tarifário" do cliente (atual) e pelo tarifário
+    // escolhido nesta proposta (novo), garantindo que a comparação é sempre
+    // fiel aos dados do painel, independentemente do que o modelo dizia.
+    const ATUAL_RE = /^(TARIFARIO\s+)?(ATUALMENTE|ATUAL|ACTUAL)\b/;
+    const PROPOSTA_RE = /^(TARIFARIO\s+)?(PROPOSTA|PROPOSTO)\b/;
+    let headerIdx = -1, atualCol = -1, propostaColIdx = -1;
+    for(let r=0; r<grid.length; r++){
+      let ac = -1, pc = -1;
+      grid[r].forEach((val, c)=>{
+        const t = (val||'').trim().toUpperCase();
+        if(ATUAL_RE.test(t)) ac = c;
+        if(PROPOSTA_RE.test(t)) pc = c;
+      });
+      if(ac > -1 && pc > -1){ headerIdx = r; atualCol = ac; propostaColIdx = pc; break; }
+    }
+    if(headerIdx > -1){
+      grid[headerIdx][atualCol] = 'ATUALMENTE';
+      grid[headerIdx][propostaColIdx] = 'PROPOSTA';
+
+      const atualName = proposalRec.tarifario || '—';
+      const propostaName = sheetName;
+
+      const nextRow = grid[headerIdx+1];
+      const nextIsSubtitle = nextRow && !(nextRow[0]||'').trim() && !(nextRow[1]||'').trim();
+      if(nextIsSubtitle){
+        nextRow[atualCol] = atualName;
+        nextRow[propostaColIdx] = propostaName;
+      } else {
+        const subtitleRow = new Array(grid[headerIdx].length).fill('');
+        subtitleRow[atualCol] = atualName;
+        subtitleRow[propostaColIdx] = propostaName;
+        grid.splice(headerIdx+1, 0, subtitleRow);
+      }
+    }
 
     const table = document.createElement('table');
     table.className = 'proposal-grid';
