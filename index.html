@@ -264,10 +264,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <label for="statusFilter">Estado da fidelização</label>
         <select id="statusFilter">
           <option value="">Todos</option>
-          <option value="atrasado">Atrasado</option>
           <option value="alerta">Em alerta</option>
           <option value="futuro">Futuro</option>
-          <option value="outro">Sem fidelização / outro</option>
+          <option value="outro">Sem fidelização</option>
         </select>
       </div>
       <div class="field">
@@ -376,11 +375,15 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function statusFromDays(days, fimRaw){
     if(!Number.isFinite(days)){
-      return { status:'outro', statusLabel: fimRaw ? String(fimRaw).charAt(0).toUpperCase()+String(fimRaw).slice(1) : 'Sem informação' };
+      return { status:'outro', statusLabel: fimRaw ? String(fimRaw).charAt(0).toUpperCase()+String(fimRaw).slice(1) : 'Sem informação', expired:false };
     }
-    if(days < 0) return { status:'atrasado', statusLabel:`Atrasado há ${Math.abs(days)} dia(s)` };
-    if(days <= ALERT_WINDOW_DAYS) return { status:'alerta', statusLabel:`Faltam ${days} dia(s)` };
-    return { status:'futuro', statusLabel:`Faltam ${days} dia(s)` };
+    // Assim que a data de fim de fidelização chega (ou passa), o cliente deixa
+    // de ter fidelização ativa — conta para o mesmo tile "Sem fidelização" dos
+    // clientes sem data associada (em vez de um tile "Atrasado" à parte).
+    // Marcamos expired=true só para destacar visualmente a urgência na tabela.
+    if(days <= 0) return { status:'outro', statusLabel: days===0 ? 'Sem fidelização — vence hoje' : `Sem fidelização — venceu há ${Math.abs(days)} dia(s)`, expired:true };
+    if(days <= ALERT_WINDOW_DAYS) return { status:'alerta', statusLabel:`Faltam ${days} dia(s)`, expired:false };
+    return { status:'futuro', statusLabel:`Faltam ${days} dia(s)`, expired:false };
   }
 
   function buildRecord(rowArr){
@@ -402,7 +405,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       morada: get('morada')||'', cp: get('cp')||'',
       estadoContato: get('estado_contato')||'', estadoData: get('estado_data')||'',
       fimDate, fimRaw, proxDate, proxRaw,
-      status: s.status, statusLabel: s.statusLabel, days
+      status: s.status, statusLabel: s.statusLabel, expired: s.expired, days
     };
     rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
     return rec;
@@ -510,10 +513,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // ---------- App ----------
   let tarifSelEl, tilesWrap, estadoChipsWrap, activeStatus = '', activeEstadoFilter = '';
   const tilesDef = [
-    {key:'atrasado', label:'Atrasado', dot:'critical', desc:'já passou a data'},
     {key:'alerta', label:'Em alerta', dot:'warning', desc:`dentro de ${ALERT_WINDOW_DAYS} dias`},
     {key:'futuro', label:'Futuro', dot:'good', desc:`além de ${ALERT_WINDOW_DAYS} dias`},
-    {key:'outro', label:'Sem fidelização / outro', dot:'muted', desc:'sem data associada'},
+    {key:'outro', label:'Sem fidelização', dot:'critical', desc:'data já venceu ou sem data associada'},
   ];
   const estadoChipsDef = [
     {value:'', label:'Todos'},
@@ -605,7 +607,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // ligam/desligam a classe "active" — assim escrever no campo de pesquisa não
   // fica preso a recalcular tudo a cada tecla, com milhares de linhas.
   function renderTiles(){
-    const counts = {atrasado:0, alerta:0, futuro:0, outro:0};
+    const counts = {alerta:0, futuro:0, outro:0};
     records.forEach(r=>counts[r.status]++);
     tilesWrap.innerHTML='';
 
@@ -676,11 +678,13 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   }
 
   function sortRecords(){
-    const statusRank = {atrasado:0, alerta:1, futuro:2, outro:3};
+    // Os "vencidos" (data já passada) mantêm prioridade visual mesmo estando
+    // agrupados no mesmo tile/contagem que os "sem data associada".
+    const rankOf = r => r.expired ? 0 : (r.status==='alerta' ? 1 : (r.status==='futuro' ? 2 : 3));
     filtered.sort((a,b)=>{
       let av, bv;
       if(sortKey==='days'){
-        const ra = statusRank[a.status], rb = statusRank[b.status];
+        const ra = rankOf(a), rb = rankOf(b);
         if(ra!==rb) return (ra-rb)*sortDir;
         av = a.days===Infinity? 1e15 : a.days; bv = b.days===Infinity? 1e15 : b.days;
         return (av-bv)*sortDir;
@@ -722,7 +726,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function rowHtml(r, mode){
     // mode: 'view' | 'edit' | 'delete'
-    const badgeClass = r.status==='atrasado'?'critical':r.status==='alerta'?'warning':r.status==='futuro'?'good':'muted';
+    const badgeClass = r.expired?'critical':r.status==='alerta'?'warning':r.status==='futuro'?'good':'muted';
     const rowClass = 'row-'+badgeClass + (mode==='edit'?' editing':'') + (mode==='delete'?' deleting':'');
     if(mode!=='edit'){
       const contactBits = [r.contato, r.telemovel, r.email].filter(Boolean);
@@ -935,7 +939,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         rec.proxRaw = prox || null; rec.proxDate = parseISO(prox);
         const days = rec.fimDate ? Math.round((rec.fimDate - today)/86400000) : Infinity;
         const s = statusFromDays(days, rec.fimRaw);
-        rec.days = days; rec.status = s.status; rec.statusLabel = s.statusLabel;
+        rec.days = days; rec.status = s.status; rec.statusLabel = s.statusLabel; rec.expired = s.expired;
         rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
       }
       editingRowNum = null;
@@ -1053,7 +1057,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         localidade, contato, email, telemovel, observacoes,
         estadoContato, estadoData,
         fimDate, fimRaw: fim || null, proxDate, proxRaw: prox || null,
-        status: s.status, statusLabel: s.statusLabel, days
+        status: s.status, statusLabel: s.statusLabel, expired: s.expired, days
       };
       rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
       records.unshift(rec);
