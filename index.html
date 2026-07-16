@@ -431,9 +431,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function paramsFromLocation(){
     const p = new URLSearchParams(location.search);
-        const DEFAULT_API = 'https://script.google.com/macros/s/AKfycbxwB1rlRKc12T1QzWFNZ_zcffOpkGONqLa4cNTucegLBjRKyNHlhekpH8BiR3Cng9Ua/exec';
-    const DEFAULT_TOKEN = 'vOJtAuuqkgE6_9Xo0hsOjjRm73-36jMi';
-    return { api: p.get('api')||DEFAULT_API, token: p.get('token')||DEFAULT_TOKEN };
+    return { api: p.get('api')||'', token: p.get('token')||'' };
   }
   const initial = paramsFromLocation();
   // Só pré-preenchemos os campos visíveis quando NÃO vamos ligar automaticamente —
@@ -1257,12 +1255,17 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       return (upper.length / letters.length) > 0.6;
     };
 
+    // Estilo alinhado com as propostas reais que já saem da empresa (tabelas
+    // coladas do Excel para o Outlook): tudo centrado, texto a negrito e
+    // sublinhado, cinza para etiquetas/coluna atual, e "aqua" (o mesmo ciano
+    // que já usam nas propostas atuais) a destacar a coluna da proposta.
     const FONT = 'font-family:Calibri,Arial,Helvetica,sans-serif;';
     const BORDER = 'border:1px solid #999;';
     const GREY = 'background-color:#ededed;';
-    const BLUE = 'background-color:#d6f0ff;';
+    const BLUE = 'background-color:aqua;';
+    const BU = 'font-weight:bold;text-decoration:underline;'; // negrito + sublinhado, como no original
 
-    let html = `<table cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;${FONT}font-size:13px;width:100%;max-width:680px;">`;
+    let html = `<table cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;${FONT}font-size:14px;width:100%;max-width:680px;">`;
 
     rows.forEach(rowRaw=>{
       const cells = rowRaw.slice(0, colCount);
@@ -1281,28 +1284,29 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       const isLabelValue = /:$/.test(label); // ex: "MORADA:", "Nº DE CONTA:" — par etiqueta/valor, não título
       const isSectionTitle = label && !restFilled && isUpperish(label) && label.length > 3 && !isLabelValue;
       const isFinePrint = label && !restFilled && !isUpperish(label) && !isLabelValue;
-      const isMensalidade = label.toUpperCase().indexOf('MENSALIDADE') > -1;
 
       html += '<tr>';
       if(isHeaderRow){
         cells.forEach(val=>{
           const bg = isHeaderCell(val) ? GREY : '';
-          html += `<td style="padding:6px 10px;${BORDER}${bg}${FONT}font-size:13px;font-weight:bold;text-align:center;">${esc(val||'')}</td>`;
+          html += `<td style="padding:6px 10px;${BORDER}${bg}${FONT}font-size:14px;${BU}text-align:center;">${esc(val||'')}</td>`;
         });
       } else if(isBenefit){
-        html += `<td colspan="${colCount}" style="padding:6px 10px;${BORDER}${BLUE}${FONT}font-size:13px;font-weight:bold;text-align:left;">${esc(label)}</td>`;
+        html += `<td colspan="${colCount}" style="padding:6px 10px;${BORDER}${BLUE}${FONT}font-size:14px;${BU}text-align:center;">${esc(label)}</td>`;
       } else if(isSectionTitle){
-        html += `<td colspan="${colCount}" style="padding:6px 10px;${BORDER}${GREY}${FONT}font-size:13px;font-weight:bold;text-align:center;text-decoration:underline;">${esc(label)}</td>`;
+        html += `<td colspan="${colCount}" style="padding:6px 10px;${BORDER}${GREY}${FONT}font-size:14px;${BU}text-align:center;">${esc(label)}</td>`;
       } else if(isFinePrint){
-        html += `<td colspan="${colCount}" style="padding:6px 10px;${FONT}font-size:11px;color:#666;text-align:left;">${esc(label)}</td>`;
+        html += `<td colspan="${colCount}" style="padding:6px 10px;${FONT}font-size:11px;color:#666;text-align:center;">${esc(label)}</td>`;
       } else {
         cells.forEach((val, c)=>{
-          let style = `padding:6px 10px;${BORDER}${FONT}font-size:13px;text-align:center;`;
+          const filled = (val||'').trim()!=='';
+          let style = `padding:6px 10px;${BORDER}${FONT}font-size:14px;text-align:center;`;
           if(c===0 && label){
-            style += `font-weight:bold;${GREY}text-align:left;`;
-          } else if(c===propostaCol && (val||'').trim()!==''){
-            style += BLUE;
-            if(isMensalidade) style += 'font-weight:bold;';
+            style += `${BU}${GREY}`;
+          } else if(c===propostaCol && filled){
+            style += `${BU}${BLUE}`;
+          } else if(filled){
+            style += BU;
           }
           html += `<td style="${style}">${esc(val||'')}</td>`;
         });
