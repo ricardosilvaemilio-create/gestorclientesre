@@ -1263,7 +1263,15 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const BLUE = 'background-color:aqua;';
     const BU = 'font-weight:bold;text-decoration:underline;'; // negrito + sublinhado, como no original
 
-    let html = `<table cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;${FONT}font-size:14px;width:100%;max-width:680px;">`;
+    // Larguras fixas por coluna — a coluna da Proposta (a última, destacada a
+    // aqua) ficava mais estreita que a Atualmente por ter menos texto "molde"
+    // à volta; aqui damos a mesma largura às duas colunas de comparação.
+    const colWidths = colCount>=4
+      ? ['16%','12%','36%','36%']
+      : Array(colCount).fill((100/colCount).toFixed(2)+'%');
+    const colgroup = `<colgroup>${colWidths.map(w=>`<col style="width:${w};">`).join('')}</colgroup>`;
+
+    let html = `<table cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;${FONT}font-size:14px;width:100%;max-width:680px;table-layout:fixed;">${colgroup}`;
 
     rows.forEach(rowRaw=>{
       const cells = rowRaw.slice(0, colCount);
@@ -1295,6 +1303,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         html += `<td colspan="${colCount}" style="padding:6px 10px;${BORDER}${GREY}${FONT}font-size:14px;${BU}text-align:center;">${esc(label)}</td>`;
       } else if(isFinePrint){
         html += `<td colspan="${colCount}" style="padding:6px 10px;${FONT}font-size:11px;color:#666;text-align:center;">${esc(label)}</td>`;
+      } else if(isLabelValue){
+        // "MORADA:", "Nº DE CONTA:" — etiqueta + um valor só (normalmente na
+        // 2ª coluna, com as restantes vazias). Juntamos as colunas do valor
+        // numa célula só, a ocupar o espaço todo, em vez de ficar espremido
+        // numa coluna estreita com células vazias ao lado.
+        const value = cells.slice(1).find(v=>(v||'').trim()!=='') || '';
+        html += `<td style="padding:6px 10px;${BORDER}${GREY}${FONT}font-size:14px;${BU}text-align:center;">${esc(label)}</td>`;
+        html += `<td colspan="${colCount-1}" style="padding:6px 10px;${BORDER}${FONT}font-size:14px;${value.trim()?BU:''}text-align:center;">${esc(value)}</td>`;
       } else {
         cells.forEach((val, c)=>{
           const filled = (val||'').trim()!=='';
