@@ -216,13 +216,37 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
 .proposal-status.error{color:var(--critical);}
 .proposal-status.ok{color:var(--good);}
 
-table.proposal-grid{width:100%; border-collapse:collapse;}
-table.proposal-grid td{padding:2px; border:1px solid var(--grid);}
+#proposalGridWrap{overflow-x:auto; max-width:100%;}
+.proposal-grid-hint{font-size:11.5px; color:var(--text-secondary); margin:0 0 6px 0;}
+table.proposal-grid{border-collapse:collapse; table-layout:fixed;}
+table.proposal-grid td{padding:2px; border:1px solid var(--grid); position:relative;}
 table.proposal-grid input{
-  width:100%; min-width:80px; border:1px solid transparent; border-radius:4px; padding:5px 6px;
+  width:100%; min-width:0; box-sizing:border-box; border:1px solid transparent; border-radius:4px; padding:5px 6px;
   font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary);
 }
 table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
+.col-resizer{
+  position:absolute; top:0; right:-4px; width:8px; height:100%; cursor:col-resize; z-index:2;
+}
+.col-resizer:hover, .col-resizer.resizing{ background:var(--blue); opacity:0.45; }
+
+/* Ecrã de carregamento — logótipo + barra de progresso enquanto vêm os dados */
+.loading-screen{
+  display:flex; flex-direction:column; align-items:center; justify-content:center;
+  gap:22px; min-height:70vh; text-align:center;
+}
+.loading-logo{width:110px; height:110px; animation:loading-pulse 1.8s ease-in-out infinite;}
+@keyframes loading-pulse{
+  0%,100%{ transform:scale(1); opacity:1; }
+  50%{ transform:scale(1.06); opacity:0.85; }
+}
+.loading-bar-track{
+  width:280px; max-width:80vw; height:8px; border-radius:6px; background:var(--muted-bg); overflow:hidden;
+}
+.loading-bar-fill{
+  height:100%; width:6%; background:var(--blue); border-radius:6px; transition:width 0.25s ease;
+}
+.loading-text{ font-size:13px; color:var(--text-secondary); margin:0; }
 </style>
 </head>
 <body>
@@ -242,6 +266,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     <button class="btn primary" id="connectBtn">Ligar</button>
     <div class="error" id="gateError"></div>
     <p style="margin-top:14px;font-size:11.5px;">Dica: guarda um marcador (bookmark) com <code>?api=URL&token=TOKEN</code> no fim do link desta página para entrares automaticamente da próxima vez, em qualquer computador.</p>
+  </div>
+
+  <div id="loadingScreen" class="loading-screen hidden">
+    <img class="loading-logo" src="data:image/png;base64,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" alt="Empresas">
+    <div class="loading-bar-track"><div class="loading-bar-fill" id="loadingBarFill"></div></div>
+    <p class="loading-text" id="loadingText">A carregar dados…</p>
   </div>
 
   <div id="app" class="hidden">
@@ -319,6 +349,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
             <label for="proposalOutro">Texto de confirmação (aparece a negrito, antes da tabela)</label>
             <textarea id="proposalOutro" rows="2" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text-primary);resize:vertical;"></textarea>
           </div>
+          <p class="proposal-grid-hint">Arrasta o limite direito de qualquer coluna para a alargares ou estreitares.</p>
           <div id="proposalGridWrap"></div>
         </div>
         <div class="modal-footer">
@@ -428,6 +459,22 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   const gate = document.getElementById('gate');
   const app = document.getElementById('app');
   const gateError = document.getElementById('gateError');
+  const loadingScreen = document.getElementById('loadingScreen');
+  const loadingBarFill = document.getElementById('loadingBarFill');
+  const loadingText = document.getElementById('loadingText');
+
+  // Atualiza a barra de progresso e o texto do ecrã de carregamento inicial.
+  // Sem total conhecido ainda (primeira página a caminho), mostra uma
+  // percentagem mínima só para dar sensação de movimento.
+  function setLoadingProgress(count, total){
+    const pct = total ? Math.min(100, Math.max(6, Math.round(count/total*100))) : 6;
+    if(loadingBarFill) loadingBarFill.style.width = pct + '%';
+    if(loadingText){
+      loadingText.textContent = count
+        ? ('A carregar dados… ' + count.toLocaleString('pt-PT') + (total ? (' / '+total.toLocaleString('pt-PT')) : ''))
+        : 'A carregar dados…';
+    }
+  }
 
   function paramsFromLocation(){
     const p = new URLSearchParams(location.search);
@@ -458,8 +505,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       gateError.classList.add('show');
       return;
     }
-    document.getElementById('connectBtn').disabled = true;
-    document.getElementById('connectBtn').textContent = 'A ligar…';
+    gate.classList.add('hidden');
+    loadingScreen.classList.remove('hidden');
+    setLoadingProgress(0, null);
     loadData(true);
   }
 
@@ -476,10 +524,10 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
             throw new Error(data.error || 'erro desconhecido');
           }
           allRows.push.apply(allRows, data.rows||[]);
-          const progressText = 'A carregar… ' + allRows.length.toLocaleString('pt-PT') + (data.total? (' / '+data.total.toLocaleString('pt-PT')) : '');
           if(firstLoad){
-            document.getElementById('connectBtn').textContent = progressText;
+            setLoadingProgress(allRows.length, data.total);
           } else {
+            const progressText = 'A carregar… ' + allRows.length.toLocaleString('pt-PT') + (data.total? (' / '+data.total.toLocaleString('pt-PT')) : '');
             const sl = document.getElementById('summaryLine');
             if(sl) sl.textContent = progressText;
           }
@@ -494,7 +542,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         records = allRows.map(buildRecord);
         setSyncState('ok');
         if(firstLoad){
-          gate.classList.add('hidden');
+          setLoadingProgress(allRows.length, allRows.length);
+          loadingScreen.classList.add('hidden');
           app.classList.remove('hidden');
           initApp();
         } else {
@@ -507,6 +556,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       .catch(err=>{
         setSyncState('error');
         if(firstLoad){
+          loadingScreen.classList.add('hidden');
+          gate.classList.remove('hidden');
           gateError.textContent = 'Não foi possível ligar: ' + err.message + '. Confirma o URL, o token, e se a implementação está com acesso "Qualquer pessoa".';
           gateError.classList.add('show');
           document.getElementById('connectBtn').disabled = false;
@@ -1115,6 +1166,10 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   const DEFAULT_PROPOSAL_INTRO = 'Espero que se encontre bem.\n\nConforme combinado, envio proposta de renegociação ao contrato MEO Empresas, através de uma tabela comparativa entre os serviços que tem atualmente e os serviços que estou a propor, destacando, a fundo azul, os benefícios.';
   const DEFAULT_PROPOSAL_OUTRO = 'Caso concorde com as condições, responda a este e-mail a indicar que aceita as novas condições.';
+  // Largura do e-mail de proposta (em pixels) — a tabela e o texto de
+  // introdução/fecho usam sempre a mesma largura, para o e-mail ler-se como
+  // um bloco só, em vez de o texto ficar mais estreito que a tabela.
+  const PROPOSAL_EMAIL_WIDTH = 2320;
 
   function openProposalModal(rec){
     proposalRec = rec;
@@ -1188,23 +1243,51 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       if(ac > -1 && pc > -1){ headerIdx = r; atualCol = ac; propostaColIdx = pc; break; }
     }
     if(headerIdx > -1){
-      grid[headerIdx][atualCol] = 'ATUALMENTE';
-
       const atualName = proposalRec.tarifario || '—';
+      // Nome e cabeçalho na MESMA célula (como no modelo original — "ATUALMENTE
+      // M4 TOP 500/100 10GB" tudo numa linha só, que quebra sozinha por ser
+      // grande), em vez de uma segunda linha da tabela só para o nome.
+      grid[headerIdx][atualCol] = 'ATUALMENTE ' + atualName;
 
+      // Alguns modelos trazem uma linha extra por baixo do cabeçalho, vazia
+      // nas primeiras colunas, só para guardar o nome do tarifário proposto
+      // (que já não tocamos). Juntamos esse nome à própria célula do
+      // cabeçalho da proposta, e removemos a linha extra, para ficar tudo
+      // numa única linha tal como do lado do "Atualmente".
       const nextRow = grid[headerIdx+1];
       const nextIsSubtitle = nextRow && !(nextRow[0]||'').trim() && !(nextRow[1]||'').trim();
       if(nextIsSubtitle){
-        nextRow[atualCol] = atualName;
-      } else {
-        const subtitleRow = new Array(grid[headerIdx].length).fill('');
-        subtitleRow[atualCol] = atualName;
-        grid.splice(headerIdx+1, 0, subtitleRow);
+        const propostaExtra = (nextRow[propostaColIdx]||'').trim();
+        if(propostaExtra){
+          grid[headerIdx][propostaColIdx] = ((grid[headerIdx][propostaColIdx]||'').trim() + ' ' + propostaExtra).trim();
+        }
+        nextRow[atualCol] = '';
+        nextRow[propostaColIdx] = '';
+        const nowEmpty = nextRow.every(v=>!(v||'').trim());
+        if(nowEmpty) grid.splice(headerIdx+1, 1);
       }
     }
 
     const table = document.createElement('table');
     table.className = 'proposal-grid';
+
+    // Larguras iniciais das colunas (em pixels) nesta pré-visualização — o
+    // utilizador pode arrastar o limite direito de qualquer célula para
+    // ajustar a coluna ao gosto dele. Isto afeta só a edição aqui na
+    // janela; a largura da tabela realmente enviada por e-mail mantém-se
+    // sempre fixa e legível (definida à parte em proposalGridToHtml).
+    const colCount = grid.length ? grid[0].length : 0;
+    const DEFAULT_COL_WIDTHS = [110, 130, 280, 280];
+    const cols = [];
+    const colgroup = document.createElement('colgroup');
+    for(let c=0; c<colCount; c++){
+      const col = document.createElement('col');
+      col.style.width = (DEFAULT_COL_WIDTHS[c] || 200) + 'px';
+      colgroup.appendChild(col);
+      cols.push(col);
+    }
+    table.appendChild(colgroup);
+
     grid.forEach((row, r)=>{
       const tr = document.createElement('tr');
       row.forEach((val, c)=>{
@@ -1214,6 +1297,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         input.value = val;
         input.dataset.r = r; input.dataset.c = c;
         td.appendChild(input);
+        if(c < colCount - 1){
+          const resizer = document.createElement('div');
+          resizer.className = 'col-resizer';
+          resizer.addEventListener('mousedown', (ev)=>startColResize(ev, cols[c], td));
+          td.appendChild(resizer);
+        }
         tr.appendChild(td);
       });
       table.appendChild(tr);
@@ -1222,6 +1311,30 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     wrap.appendChild(table);
     sendBtn.disabled = false;
     setProposalStatus('');
+  }
+
+  // Arrastar para redimensionar uma coluna da grelha de edição da proposta:
+  // segue o rato enquanto o botão está pressionado, ajustando a largura da
+  // coluna (elemento <col>) com base na largura inicial da célula onde o
+  // arrasto começou.
+  function startColResize(ev, col, cell){
+    ev.preventDefault();
+    ev.stopPropagation();
+    const startX = ev.clientX;
+    const startWidth = cell.getBoundingClientRect().width;
+    const resizer = ev.currentTarget;
+    resizer.classList.add('resizing');
+    function onMove(e){
+      const delta = e.clientX - startX;
+      col.style.width = Math.max(40, Math.round(startWidth + delta)) + 'px';
+    }
+    function onUp(){
+      resizer.classList.remove('resizing');
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
   }
 
   function proposalGridToHtml(){
@@ -1238,11 +1351,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const colCount = rows.reduce((m,row)=>Math.max(m, row.length), 1);
 
     // localiza a coluna "PROPOSTA" (pela linha de cabeçalho ATUALMENTE/PROPOSTA)
-    // para saber que coluna destacar a azul — por omissão, a última.
+    // para saber que coluna destacar a azul — por omissão, a última. A célula
+    // pode trazer só "PROPOSTA" ou "PROPOSTA <nome do tarifário>" a seguir,
+    // por isso comparamos por início da frase, não por igualdade exata.
     let propostaCol = colCount - 1;
     rows.forEach(row=>{
       row.forEach((val, c)=>{
-        if((val||'').trim().toUpperCase() === 'PROPOSTA') propostaCol = c;
+        const t = (val||'').trim().toUpperCase();
+        if(t.indexOf('PROPOSTA')===0 || t.indexOf('PROPOSTO')===0) propostaCol = c;
       });
     });
 
@@ -1263,33 +1379,72 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const BLUE = 'background-color:aqua;';
     const BU = 'font-weight:bold;text-decoration:underline;'; // negrito + sublinhado, como no original
 
-    // Larguras fixas por coluna — a coluna da Proposta (a última, destacada a
-    // aqua) ficava mais estreita que a Atualmente por ter menos texto "molde"
-    // à volta; aqui damos a mesma largura às duas colunas de comparação.
+    // Larguras fixas por coluna, em pixels absolutos (não percentagem) — a
+    // 2ª coluna (etiquetas curtas tipo "comunicações"/"dados móveis")
+    // precisa de mais espaço para não partir a palavra a meio, e
+    // Atualmente/Proposta (3ª e 4ª) ficam com o dobro da largura das outras
+    // duas, para textos como "3500 min. + 3500 SMS redes nacionais"
+    // caberem numa única linha.
+    const TABLE_WIDTH = PROPOSAL_EMAIL_WIDTH;
     const colWidths = colCount>=4
-      ? ['16%','12%','36%','36%']
-      : Array(colCount).fill((100/colCount).toFixed(2)+'%');
-    const colgroup = `<colgroup>${colWidths.map(w=>`<col style="width:${w};">`).join('')}</colgroup>`;
+      ? [186, 209, 963, 962]
+      : Array(colCount).fill(Math.round(TABLE_WIDTH/colCount));
+    const colgroup = `<colgroup>${colWidths.map(w=>`<col style="width:${w}px;">`).join('')}</colgroup>`;
 
-    let html = `<table cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;${FONT}font-size:14px;width:100%;max-width:680px;table-layout:fixed;">${colgroup}`;
+    // Largura fixa em pixels (não percentagem/max-width) — assim a tabela
+    // não encolhe para caber no ecrã em clientes de e-mail mais estreitos
+    // (telemóvel); o destinatário arrasta para o lado se for preciso, tal
+    // como as tuas propostas já saem hoje quando coladas do Excel.
+    let html = `<table cellspacing="0" cellpadding="0" border="0" width="${TABLE_WIDTH}" style="border-collapse:collapse;${FONT}font-size:14px;width:${TABLE_WIDTH}px;table-layout:fixed;">${colgroup}`;
 
-    rows.forEach(rowRaw=>{
+    // cabeçalho ATUALMENTE/PROPOSTA — normalmente etiqueta exata, mas em
+    // alguns modelos vem como "ATUALMENTE <nome do tarifário>" (célula com
+    // quebra de linha no Excel original, dividida em 2 linhas na extração).
+    const isHeaderCell = v => {
+      const t = (v||'').trim().toUpperCase();
+      return t.indexOf('ATUALMENTE')===0 || t.indexOf('PROPOSTA')===0;
+    };
+
+    // 1ª passagem: classifica cada linha (precisamos disto de antemão para
+    // sabermos, linha a linha, se pertencem a um grupo com etiqueta comum
+    // na 1ª coluna — ex: "TELEMÓVEIS" a abranger 3 linhas de cartões, ou
+    // "EQUIPAMENTOS" a abranger "BASE"/"MOBILITY"/"Site" — tal como no
+    // modelo original, onde essas células vêm unidas verticalmente.
+    const meta = rows.map(rowRaw=>{
       const cells = rowRaw.slice(0, colCount);
       while(cells.length < colCount) cells.push('');
       const label = (cells[0]||'').trim();
       const restFilled = cells.slice(1).some(v=>(v||'').trim()!=='');
-      // cabeçalho ATUALMENTE/PROPOSTA — normalmente etiqueta exata, mas em
-      // alguns modelos vem como "ATUALMENTE <nome do tarifário>" (célula com
-      // quebra de linha no Excel original, dividida em 2 linhas na extração).
-      const isHeaderCell = v => {
-        const t = (v||'').trim().toUpperCase();
-        return t.indexOf('ATUALMENTE')===0 || t.indexOf('PROPOSTA')===0;
-      };
       const isHeaderRow = !label && cells.slice(2).some(isHeaderCell);
       const isBenefit = label.indexOf('>')===0;
       const isLabelValue = /:$/.test(label); // ex: "MORADA:", "Nº DE CONTA:" — par etiqueta/valor, não título
       const isSectionTitle = label && !restFilled && isUpperish(label) && label.length > 3 && !isLabelValue;
       const isFinePrint = label && !restFilled && !isUpperish(label) && !isLabelValue;
+      const isDefault = !isHeaderRow && !isBenefit && !isSectionTitle && !isFinePrint && !isLabelValue;
+      return { cells, label, isHeaderRow, isBenefit, isLabelValue, isSectionTitle, isFinePrint, isDefault, rowspan: 1, skipCol0: false };
+    });
+
+    // 2ª passagem: agrupa linhas "default" consecutivas em que só a
+    // primeira tem etiqueta na coluna 0 e as seguintes vêm em branco nessa
+    // coluna (mas com conteúdo nas outras) — sinal de que, no Excel
+    // original, essa célula estava unida verticalmente.
+    for(let i=0; i<meta.length; i++){
+      const m = meta[i];
+      if(!m.isDefault || !m.label) continue;
+      let span = 1;
+      for(let j=i+1; j<meta.length; j++){
+        const next = meta[j];
+        if(!next.isDefault || next.label) break;
+        const nextRestFilled = next.cells.slice(1).some(v=>(v||'').trim()!=='');
+        if(!nextRestFilled) break;
+        next.skipCol0 = true;
+        span++;
+      }
+      m.rowspan = span;
+    }
+
+    meta.forEach(m=>{
+      const { cells, label, isHeaderRow, isBenefit, isLabelValue, isSectionTitle, isFinePrint, rowspan, skipCol0 } = m;
 
       html += '<tr>';
       if(isHeaderRow){
@@ -1313,6 +1468,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         html += `<td colspan="${colCount-1}" style="padding:6px 10px;${BORDER}${FONT}font-size:14px;${value.trim()?BU:''}text-align:center;">${esc(value)}</td>`;
       } else {
         cells.forEach((val, c)=>{
+          if(c===0 && skipCol0) return; // célula já coberta pelo rowspan da linha do grupo
           const filled = (val||'').trim()!=='';
           let style = `padding:6px 10px;${BORDER}${FONT}font-size:14px;text-align:center;`;
           if(c===0 && label){
@@ -1322,7 +1478,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           } else if(filled){
             style += BU;
           }
-          html += `<td style="${style}">${esc(val||'')}</td>`;
+          const span = (c===0 && rowspan>1) ? ` rowspan="${rowspan}"` : '';
+          html += `<td${span} style="${style}">${esc(val||'')}</td>`;
         });
       }
       html += '</tr>';
@@ -1343,12 +1500,21 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     }).join('');
   }
 
+  // Envolve o texto de introdução/fecho numa tabela de largura fixa igual à
+  // da tabela comparativa (PROPOSAL_EMAIL_WIDTH), para o e-mail ler-se como
+  // um bloco só em vez de o texto ficar mais estreito do que a tabela.
+  function paragraphsBlockToHtml(text, opts){
+    const inner = paragraphsToHtml(text, opts);
+    if(!inner) return '';
+    return `<table cellspacing="0" cellpadding="0" border="0" width="${PROPOSAL_EMAIL_WIDTH}" style="border-collapse:collapse;width:${PROPOSAL_EMAIL_WIDTH}px;table-layout:fixed;"><tr><td style="padding:0 0 6px 0;">${inner}</td></tr></table>`;
+  }
+
   function buildProposalEmailHtml(){
     const intro = document.getElementById('proposalIntro').value;
     const outro = document.getElementById('proposalOutro').value;
     let html = '';
-    if(intro.trim()) html += paragraphsToHtml(intro);
-    if(outro.trim()) html += paragraphsToHtml(outro, {bold:true});
+    if(intro.trim()) html += paragraphsBlockToHtml(intro);
+    if(outro.trim()) html += paragraphsBlockToHtml(outro, {bold:true});
     html += proposalGridToHtml();
     return html;
   }
