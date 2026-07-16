@@ -252,7 +252,18 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 <body>
 <div class="wrap">
 
-  <div id="gate" class="gate">
+  <div id="accessGate" class="gate">
+    <h2>Acesso protegido</h2>
+    <p>Introduz a password para abrires o painel.</p>
+    <div class="field">
+      <label for="accessPassword">Password</label>
+      <input id="accessPassword" type="password" placeholder="password" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+    </div>
+    <button class="btn primary" id="accessBtn">Entrar</button>
+    <div class="error" id="accessError">Password incorreta.</div>
+  </div>
+
+  <div id="gate" class="gate hidden">
     <h2>Gestão de Fidelizações</h2>
     <p>Este painel não guarda dados de clientes no código — liga-se em direto à tua Google Sheet através do Apps Script. Introduz o URL e o token que configuraste (ver o ficheiro Code.gs).</p>
     <div class="field">
@@ -480,17 +491,69 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const p = new URLSearchParams(location.search);
     return { api: p.get('api')||'', token: p.get('token')||'' };
   }
-  const initial = paramsFromLocation();
-  // Só pré-preenchemos os campos visíveis quando NÃO vamos ligar automaticamente —
-  // se ligarmos automaticamente a partir do URL, usamos os valores da query string
-  // diretamente (sem passar pelos <input>), para o autofill do navegador nunca
-  // ter oportunidade de sobrepor o token com um valor guardado antigo.
-  if(initial.api && initial.token){
-    connect(initial.api, initial.token);
-  } else {
-    if(initial.api) document.getElementById('apiUrl').value = initial.api;
-    if(initial.token) document.getElementById('apiToken').value = initial.token;
+
+  // Só depois de a password de acesso estar correta é que avançamos para o
+  // ecrã de ligação à Google Sheet (ou ligamos automaticamente, se o URL já
+  // trouxer api+token de um marcador guardado).
+  function proceedAfterAccess(){
+    const initial = paramsFromLocation();
+    // Só pré-preenchemos os campos visíveis quando NÃO vamos ligar automaticamente —
+    // se ligarmos automaticamente a partir do URL, usamos os valores da query string
+    // diretamente (sem passar pelos <input>), para o autofill do navegador nunca
+    // ter oportunidade de sobrepor o token com um valor guardado antigo.
+    if(initial.api && initial.token){
+      connect(initial.api, initial.token);
+    } else {
+      gate.classList.remove('hidden');
+      if(initial.api) document.getElementById('apiUrl').value = initial.api;
+      if(initial.token) document.getElementById('apiToken').value = initial.token;
+    }
   }
+
+  // ---------- Password de acesso ----------
+  // Proteção do lado do cliente: a password não fica em texto simples no
+  // código, só o seu hash SHA-256 (debe846871918981cf3fe8adfb322339395dd86e7f75682b177a64c0c36caca6). Isto trava
+  // acesso casual de quem apanhar o link — não substitui o token da Google
+  // Sheet, que continua a ser a proteção real dos dados.
+  const ACCESS_HASH = 'debe846871918981cf3fe8adfb322339395dd86e7f75682b177a64c0c36caca6';
+  const accessGate = document.getElementById('accessGate');
+  const accessPassword = document.getElementById('accessPassword');
+  const accessError = document.getElementById('accessError');
+  const accessBtn = document.getElementById('accessBtn');
+
+  async function sha256Hex(text){
+    const bytes = new TextEncoder().encode(text);
+    const digest = await crypto.subtle.digest('SHA-256', bytes);
+    return Array.from(new Uint8Array(digest)).map(b=>b.toString(16).padStart(2,'0')).join('');
+  }
+
+  async function tryAccess(){
+    const value = accessPassword.value;
+    accessError.classList.remove('show');
+    if(!value){
+      accessError.textContent = 'Introduz a password.';
+      accessError.classList.add('show');
+      return;
+    }
+    accessBtn.disabled = true;
+    const hash = await sha256Hex(value);
+    accessBtn.disabled = false;
+    if(hash === ACCESS_HASH){
+      accessGate.classList.add('hidden');
+      proceedAfterAccess();
+    } else {
+      accessError.textContent = 'Password incorreta.';
+      accessError.classList.add('show');
+      accessPassword.value = '';
+      accessPassword.focus();
+    }
+  }
+
+  accessBtn.addEventListener('click', tryAccess);
+  accessPassword.addEventListener('keydown', (e)=>{
+    if(e.key === 'Enter') tryAccess();
+  });
+  accessPassword.focus();
 
   document.getElementById('connectBtn').addEventListener('click', ()=>{
     connect(document.getElementById('apiUrl').value.trim(), document.getElementById('apiToken').value.trim());
