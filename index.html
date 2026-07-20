@@ -13,6 +13,7 @@
   --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
   --good-bg:#e7f7e7; --warning-bg:#fff4de; --serious-bg:#fdece4; --critical-bg:#fbe4e4;
   --muted-bg:#eeede9; --blue:#2a78d6; --blue-bg:#e8f0fc;
+  --lista-amarela-bg:#fef08a;
 }
 @media (prefers-color-scheme: dark){
   :root:where(:not([data-theme="light"])){
@@ -23,6 +24,7 @@
     --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#e66767;
     --good-bg:#123312; --warning-bg:#3a2c0c; --serious-bg:#3a2018; --critical-bg:#3a1717;
     --muted-bg:#2a2a28; --blue:#3987e5; --blue-bg:#152840;
+    --lista-amarela-bg:#4a3f0a;
   }
 }
 :root[data-theme="dark"]{
@@ -33,6 +35,7 @@
   --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#e66767;
   --good-bg:#123312; --warning-bg:#3a2c0c; --serious-bg:#3a2018; --critical-bg:#3a1717;
   --muted-bg:#2a2a28; --blue:#3987e5; --blue-bg:#152840;
+  --lista-amarela-bg:#4a3f0a;
 }
 *{box-sizing:border-box;}
 body{
@@ -161,6 +164,14 @@ tr.row-critical td.dates{border-left:3px solid var(--critical); padding-left:9px
 tr.row-warning td.dates{border-left:3px solid var(--warning); padding-left:9px;}
 tr.row-good td.dates{border-left:3px solid var(--blue); padding-left:9px;}
 tr.row-muted td.dates{border-left:3px solid var(--baseline); padding-left:9px;}
+
+.situacao-pill{display:inline-block; padding:2px 9px; border-radius:100px; font-size:11.5px; font-weight:600; white-space:nowrap; margin-top:4px;}
+.situacao-pill.amarela{background:var(--lista-amarela-bg); color:#8a5a00;}
+.situacao-pill.semfid{background:var(--muted-bg); color:var(--text-secondary);}
+/* Lista Amarela: destaca a linha toda a amarelo — mas não durante edição/apagar,
+   para não competir com os estados de ação (azul/vermelho) dessas linhas. */
+tr.lista-amarela:not(.editing):not(.deleting){background:var(--lista-amarela-bg);}
+.estado-edit{display:flex; flex-direction:column; gap:4px;}
 
 .pager{display:flex; justify-content:space-between; align-items:center; margin-top:14px; gap:10px; flex-wrap:wrap;}
 .pager .info{color:var(--text-secondary); font-size:12.5px;}
@@ -387,12 +398,18 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   let page = 1;
   const pageSize = 50;
 
-  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data'];
-  // row array from Apps Script: [rowNum, A..S] -> index i+1 = COLS[i]
-  // estado_contato = coluna R, estado_data = coluna S (têm de existir na folha — ver Code.gs).
+  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data','situacao_especial'];
+  // row array from Apps Script: [rowNum, A..T] -> index i+1 = COLS[i]
+  // estado_contato = coluna R, estado_data = coluna S, situacao_especial =
+  // coluna T (têm de existir na folha — ver Code.gs).
 
   // Hipóteses do "Estado do contacto" — para adicionar mais opções, acrescenta aqui.
   const ESTADO_OPTIONS = ['Em negociação', 'Aguardo documentação', 'Concluído'];
+  // Situação especial do cliente. "Sem fidelização" e "Cliente Sem serviços"
+  // fazem o cliente contar sempre no bucket "Sem fidelização" (independente
+  // da data) e limpam a data de Fim de fidelização ao serem escolhidas no
+  // formulário. "Lista Amarela" destaca a linha toda a amarelo na tabela.
+  const SITUACAO_ESPECIAL_OPTIONS = ['Sem fidelização', 'Lista Amarela', 'Cliente Sem serviços'];
 
   function stripAccents(s){ return s.normalize('NFD').replace(/[̀-ͯ]/g,''); }
   function parseISO(s){
@@ -428,7 +445,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   const today = new Date(); today.setHours(0,0,0,0);
 
-  function statusFromDays(days, fimRaw){
+  function statusFromDays(days, fimRaw, situacaoEspecial){
+    // A situação especial manda sempre que for uma destas duas — mesmo que
+    // ainda exista (ou volte a existir) uma data de Fim de fidelização
+    // gravada, o cliente conta logo como "Sem fidelização" assim que uma
+    // destas opções é escolhida no formulário.
+    if(situacaoEspecial === 'Sem fidelização' || situacaoEspecial === 'Cliente Sem serviços'){
+      return { status:'outro', statusLabel: situacaoEspecial, expired:false };
+    }
     if(!Number.isFinite(days)){
       return { status:'outro', statusLabel: fimRaw ? String(fimRaw).charAt(0).toUpperCase()+String(fimRaw).slice(1) : 'Sem informação', expired:false };
     }
@@ -449,7 +473,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const fimDate = parseISO(fimRaw);
     const proxDate = parseISO(proxRaw);
     const days = fimDate ? Math.round((fimDate - today)/86400000) : Infinity;
-    const s = statusFromDays(days, fimRaw);
+    const situacaoEspecial = get('situacao_especial') || '';
+    const s = statusFromDays(days, fimRaw, situacaoEspecial);
     const tarifario = get('tarifario') || '';
     const rec = {
       rowNum,
@@ -459,10 +484,11 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       telemovel: get('telemovel')||'', observacoes: get('observacoes')||'',
       morada: get('morada')||'', cp: get('cp')||'',
       estadoContato: get('estado_contato')||'', estadoData: get('estado_data')||'',
+      situacaoEspecial,
       fimDate, fimRaw, proxDate, proxRaw,
       status: s.status, statusLabel: s.statusLabel, expired: s.expired, days
     };
-    rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
+    rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial).toLowerCase());
     return rec;
   }
 
@@ -854,7 +880,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   function rowHtml(r, mode){
     // mode: 'view' | 'edit' | 'delete'
     const badgeClass = r.expired?'critical':r.status==='alerta'?'warning':r.status==='futuro'?'good':'muted';
-    const rowClass = 'row-'+badgeClass + (mode==='edit'?' editing':'') + (mode==='delete'?' deleting':'');
+    const listaAmarela = r.situacaoEspecial === 'Lista Amarela';
+    const rowClass = 'row-'+badgeClass + (listaAmarela?' lista-amarela':'') + (mode==='edit'?' editing':'') + (mode==='delete'?' deleting':'');
     if(mode!=='edit'){
       const contactBits = [r.contato, r.telemovel, r.email].filter(Boolean);
       const actionsHtml = mode==='delete'
@@ -864,6 +891,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         : `<button class="proposta-btn" type="button">Proposta Cliente</button>
            <button class="edit-row-btn" type="button">Editar</button>
            <button class="delete-row-btn" type="button">Apagar</button>`;
+      const situacaoPillHtml = r.situacaoEspecial
+        ? `<span class="situacao-pill ${listaAmarela?'amarela':'semfid'}">${esc(r.situacaoEspecial)}</span>`
+        : '';
       return `<tr class="${rowClass}" data-row="${r.rowNum}">
         <td class="cliente">${esc(r.cliente)}</td>
         <td>${esc(r.nif||'—')}</td>
@@ -872,12 +902,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <td>${esc(r.localidade||'—')}</td>
         <td class="dates">
           <span class="badge ${badgeClass}"><span class="ico"></span>${esc(r.statusLabel)}</span>
-          <span class="days">${r.fimDate? fmtDate(r.fimDate) : ''}</span>
+          <span class="days">${(r.fimDate && r.situacaoEspecial!=='Sem fidelização' && r.situacaoEspecial!=='Cliente Sem serviços')? fmtDate(r.fimDate) : ''}</span>
         </td>
         <td class="dates">${r.proxDate? fmtDate(r.proxDate) : esc(r.proxRaw||'—')}</td>
         <td class="estado">${r.estadoContato
           ? `<span class="estado-pill">${esc(r.estadoContato)}</span><span class="estado-date">${r.estadoData? fmtDate(parseISO(r.estadoData)) : ''}</span>`
-          : '—'}</td>
+          : (situacaoPillHtml ? '' : '—')}${situacaoPillHtml}</td>
         <td class="obs"><div class="obs-text">${esc(r.observacoes||'—')}</div></td>
         <td class="actions">${actionsHtml}</td>
       </tr>`;
@@ -886,6 +916,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const proxVal = toDateInputValue(r.proxDate, r.proxRaw);
     const estadoOptionsHtml = ['<option value="">Sem estado</option>']
       .concat(ESTADO_OPTIONS.map(opt=>`<option value="${esc(opt)}"${r.estadoContato===opt?' selected':''}>${esc(opt)}</option>`))
+      .join('');
+    const situacaoOptionsHtml = ['<option value="">—</option>']
+      .concat(SITUACAO_ESPECIAL_OPTIONS.map(opt=>`<option value="${esc(opt)}"${r.situacaoEspecial===opt?' selected':''}>${esc(opt)}</option>`))
       .join('');
     return `<tr class="${rowClass}" data-row="${r.rowNum}">
       <td><input type="text" class="f-cliente" value="${esc(r.cliente)}"></td>
@@ -899,7 +932,10 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       <td><input type="text" class="f-localidade" value="${esc(r.localidade)}"></td>
       <td><input type="date" class="f-fim" value="${fimVal}"></td>
       <td><input type="date" class="f-prox" value="${proxVal}" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização"></td>
-      <td><select class="f-estado">${estadoOptionsHtml}</select></td>
+      <td class="estado-edit">
+        <select class="f-estado">${estadoOptionsHtml}</select>
+        <select class="f-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo.">${situacaoOptionsHtml}</select>
+      </td>
       <td><textarea class="f-obs">${esc(r.observacoes==='—'?'':r.observacoes)}</textarea></td>
       <td class="actions">
         <button class="save-row-btn" type="button">Guardar</button>
@@ -911,6 +947,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   function newRecordRowHtml(){
     const estadoOptionsHtml = ['<option value="">Sem estado</option>']
       .concat(ESTADO_OPTIONS.map(opt=>`<option value="${esc(opt)}">${esc(opt)}</option>`))
+      .join('');
+    const situacaoOptionsHtml = ['<option value="">—</option>']
+      .concat(SITUACAO_ESPECIAL_OPTIONS.map(opt=>`<option value="${esc(opt)}">${esc(opt)}</option>`))
       .join('');
     return `<tr class="row-good new-record">
       <td><input type="text" class="nf-cliente" placeholder="Nome do cliente"></td>
@@ -924,7 +963,10 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       <td><input type="text" class="nf-localidade" placeholder="Localidade"></td>
       <td><input type="date" class="nf-fim"></td>
       <td><input type="date" class="nf-prox" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização"></td>
-      <td><select class="nf-estado">${estadoOptionsHtml}</select></td>
+      <td class="estado-edit">
+        <select class="nf-estado">${estadoOptionsHtml}</select>
+        <select class="nf-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo.">${situacaoOptionsHtml}</select>
+      </td>
       <td><textarea class="nf-obs" placeholder="Observações"></textarea></td>
       <td class="actions">
         <button class="create-save-btn" type="button">Guardar</button>
@@ -965,6 +1007,11 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           const proxInp = newTr.querySelector('.nf-prox');
           if(proxInp && fimVal) proxInp.value = isoMinusDays(fimVal, PROX_REFID_DAYS_BEFORE_FIM);
         });
+        newTr.querySelector('.nf-situacao').addEventListener('change', (e)=>{
+          if(e.target.value === 'Sem fidelização' || e.target.value === 'Cliente Sem serviços'){
+            newTr.querySelector('.nf-fim').value = '';
+          }
+        });
       }
 
       tableWrap.querySelectorAll('th[data-key]').forEach(th=>{
@@ -996,6 +1043,18 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         inp.addEventListener('change', ()=>{
           const proxInp = inp.closest('tr').querySelector('.f-prox');
           if(proxInp && inp.value) proxInp.value = isoMinusDays(inp.value, PROX_REFID_DAYS_BEFORE_FIM);
+        });
+      });
+      // "Sem fidelização" e "Cliente Sem serviços" limpam logo a data de Fim
+      // de fidelização no formulário — ao gravar, a folha fica com a data em
+      // branco, tal como pedido.
+      tableWrap.querySelectorAll('.f-situacao').forEach(sel=>{
+        sel.addEventListener('change', (e)=>{
+          if(e.target.value === 'Sem fidelização' || e.target.value === 'Cliente Sem serviços'){
+            const tr = e.target.closest('tr');
+            const fimInp = tr.querySelector('.f-fim');
+            if(fimInp) fimInp.value = '';
+          }
         });
       });
       tableWrap.querySelectorAll('.cancel-row-btn').forEach(btn=>{
@@ -1045,6 +1104,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const fim = val('.f-fim');
     const prox = val('.f-prox');
     const estadoContato = val('.f-estado');
+    const situacaoEspecial = val('.f-situacao');
     const observacoes = tr.querySelector('.f-obs').value;
 
     btn.disabled = true;
@@ -1061,7 +1121,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
     const updates = {
       G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
-      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes
+      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial
     };
 
     fetch(API_URL, {
@@ -1075,12 +1135,13 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         rec.contato = contato; rec.telemovel = telemovel; rec.email = email; rec.localidade = localidade;
         rec.observacoes = observacoes;
         rec.estadoContato = estadoContato; rec.estadoData = estadoData;
+        rec.situacaoEspecial = situacaoEspecial;
         rec.fimRaw = fim || null; rec.fimDate = parseISO(fim);
         rec.proxRaw = prox || null; rec.proxDate = parseISO(prox);
         const days = rec.fimDate ? Math.round((rec.fimDate - today)/86400000) : Infinity;
-        const s = statusFromDays(days, rec.fimRaw);
+        const s = statusFromDays(days, rec.fimRaw, situacaoEspecial);
         rec.days = days; rec.status = s.status; rec.statusLabel = s.statusLabel; rec.expired = s.expired;
-        rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
+        rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial).toLowerCase());
       }
       editingRowNum = null;
       setSyncState('ok');
@@ -1154,6 +1215,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const fim = val('.nf-fim');
     const prox = val('.nf-prox');
     const estadoContato = val('.nf-estado');
+    const situacaoEspecial = val('.nf-situacao');
     const observacoes = tr.querySelector('.nf-obs').value;
 
     if(!cliente){
@@ -1177,7 +1239,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const estadoData = estadoContato ? todayISO() : '';
     const values = {
       G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
-      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes
+      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial
     };
 
     fetch(API_URL, {
@@ -1189,17 +1251,17 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       const fimDate = parseISO(fim);
       const proxDate = parseISO(prox);
       const days = fimDate ? Math.round((fimDate - today)/86400000) : Infinity;
-      const s = statusFromDays(days, fim);
+      const s = statusFromDays(days, fim, situacaoEspecial);
       const rec = {
         rowNum: res.row,
         cliente, nif, subagente: '',
         tarifario, tarifNorm: tarifario.toUpperCase(),
         localidade, contato, email, telemovel, observacoes,
-        estadoContato, estadoData,
+        estadoContato, estadoData, situacaoEspecial,
         fimDate, fimRaw: fim || null, proxDate, proxRaw: prox || null,
         status: s.status, statusLabel: s.statusLabel, expired: s.expired, days
       };
-      rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato).toLowerCase());
+      rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial).toLowerCase());
       records.unshift(rec);
       creatingNew = false;
       setSyncState('ok');
@@ -1613,13 +1675,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   }
 
   function exportXls(){
-    const headers = ['Cliente','NIF','Tarifário','Subagente','Contacto','Telemóvel','E-mail','Localidade','Fim de fidelização','Estado da fidelização','Próxima refidelização','Estado do contacto','Data do estado','Observações'];
+    const headers = ['Cliente','NIF','Tarifário','Subagente','Contacto','Telemóvel','E-mail','Localidade','Fim de fidelização','Estado da fidelização','Próxima refidelização','Estado do contacto','Data do estado','Situação especial','Observações'];
     const aoa = [headers];
     filtered.forEach(r=>{
       aoa.push([r.cliente,r.nif,r.tarifario,r.subagente,r.contato,r.telemovel,r.email,r.localidade,
         r.fimDate? fmtDate(r.fimDate): (r.fimRaw||''), r.statusLabel,
         r.proxDate? fmtDate(r.proxDate): (r.proxRaw||''),
         r.estadoContato||'', r.estadoData? fmtDate(parseISO(r.estadoData)): '',
+        r.situacaoEspecial||'',
         r.observacoes]);
     });
     const ws = XLSX.utils.aoa_to_sheet(aoa);
