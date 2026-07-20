@@ -318,6 +318,11 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <select id="statusFilter">
           <option value="">Todos</option>
           <option value="pink">Em alerta</option>
+          <optgroup label="Detalhe (dentro de Em alerta)">
+            <option value="semfid">Sem fidelização</option>
+            <option value="d120">Dentro de 120 dias</option>
+            <option value="d180">Dentro de 180 dias</option>
+          </optgroup>
           <option value="blue">Futuro</option>
         </select>
       </div>
@@ -845,7 +850,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     activeStatus = st;
     filtered = records.filter(r=>{
       if(q && !r.searchBlob.includes(q)) return false;
-      if(st && r.colorGroup!==st) return false;
+      if(st==='pink' && r.colorGroup!=='pink') return false;
+      if(st==='blue' && r.colorGroup!=='blue') return false;
+      // Sub-filtros dentro de "Em alerta": Sem fidelização (status 'outro'),
+      // Dentro de 120 dias e Dentro de 180 dias (ambos dentro de 'alerta',
+      // 120 é subconjunto de 180 — mostra sempre quem está a 120 dias também).
+      if(st==='semfid' && r.status!=='outro') return false;
+      if(st==='d120' && !(r.status==='alerta' && r.days<=120)) return false;
+      if(st==='d180' && r.status!=='alerta') return false;
       if(tar && r.tarifNorm!==tar) return false;
       if(activeEstadoFilter==='__vazio__' && r.estadoContato) return false;
       if(activeEstadoFilter && activeEstadoFilter!=='__vazio__' && r.estadoContato!==activeEstadoFilter) return false;
