@@ -64,8 +64,7 @@ h1{font-size:20px; margin:0 0 4px;}
 .tile .label{display:flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); font-weight:600; text-transform:uppercase; letter-spacing:.02em;}
 .tile .value{font-size:28px; font-weight:700; margin-top:6px; font-variant-numeric:tabular-nums;}
 .dot{width:10px; height:10px; border-radius:50%; display:inline-block; flex-shrink:0;}
-.dot.critical{background:var(--critical);} .dot.warning{background:var(--warning);}
-.dot.good{background:var(--blue);} .dot.muted{background:var(--text-muted);}
+.dot.pink{background:var(--pink);} .dot.blue{background:var(--blue);}
 
 .filters{
   background:var(--card); border:1px solid var(--border); border-radius:12px;
@@ -318,9 +317,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <label for="statusFilter">Estado da fidelização</label>
         <select id="statusFilter">
           <option value="">Todos</option>
-          <option value="alerta">Em alerta</option>
-          <option value="futuro">Futuro</option>
-          <option value="outro">Sem fidelização</option>
+          <option value="pink">Em alerta</option>
+          <option value="blue">Futuro</option>
         </select>
       </div>
       <div class="field">
@@ -486,6 +484,13 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     return { status:'futuro', statusLabel:`Faltam ${days} dia(s)`, expired:false };
   }
 
+  // A tabela e os cards de resumo só usam 2 cores: azul para "futuro"
+  // (além de ALERT_WINDOW_DAYS dias), rosa para tudo o resto (dentro da
+  // janela de alerta, vencido, sem data, ou sem fidelização/sem serviços).
+  function colorGroupOf(status){
+    return status==='futuro' ? 'blue' : 'pink';
+  }
+
   function buildRecord(rowArr){
     const rowNum = rowArr[0];
     const get = (name)=> rowArr[COLS.indexOf(name)+1];
@@ -507,7 +512,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       estadoContato: get('estado_contato')||'', estadoData: get('estado_data')||'',
       situacaoEspecial,
       fimDate, fimRaw, proxDate, proxRaw,
-      status: s.status, statusLabel: s.statusLabel, expired: s.expired, days
+      status: s.status, statusLabel: s.statusLabel, expired: s.expired, colorGroup: colorGroupOf(s.status), days
     };
     rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial).toLowerCase());
     return rec;
@@ -686,10 +691,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   // ---------- App ----------
   let tarifSelEl, tilesWrap, estadoChipsWrap, activeStatus = '', activeEstadoFilter = '';
+  // 2 grupos só, a bater certo com as 2 cores da tabela: "pink" junta quem
+  // está dentro da janela de alerta com quem já não tem fidelização (venceu
+  // ou sem data); "blue" é só o futuro tranquilo (além de ALERT_WINDOW_DAYS).
   const tilesDef = [
-    {key:'alerta', label:'Em alerta', dot:'warning', desc:`dentro de ${ALERT_WINDOW_DAYS} dias`},
-    {key:'futuro', label:'Futuro', dot:'good', desc:`além de ${ALERT_WINDOW_DAYS} dias`},
-    {key:'outro', label:'Sem fidelização', dot:'critical', desc:'data já venceu ou sem data associada'},
+    {key:'pink', label:'Em alerta', dot:'pink', desc:`dentro de ${ALERT_WINDOW_DAYS} dias ou já vencido`},
+    {key:'blue', label:'Futuro', dot:'blue', desc:`além de ${ALERT_WINDOW_DAYS} dias`},
   ];
   const estadoChipsDef = [
     {value:'', label:'Todos'},
@@ -781,8 +788,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // ligam/desligam a classe "active" — assim escrever no campo de pesquisa não
   // fica preso a recalcular tudo a cada tecla, com milhares de linhas.
   function renderTiles(){
-    const counts = {alerta:0, futuro:0, outro:0};
-    records.forEach(r=>counts[r.status]++);
+    const counts = {pink:0, blue:0};
+    records.forEach(r=>counts[r.colorGroup]++);
     tilesWrap.innerHTML='';
 
     tilesDef.forEach(t=>{
@@ -838,7 +845,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     activeStatus = st;
     filtered = records.filter(r=>{
       if(q && !r.searchBlob.includes(q)) return false;
-      if(st && r.status!==st) return false;
+      if(st && r.colorGroup!==st) return false;
       if(tar && r.tarifNorm!==tar) return false;
       if(activeEstadoFilter==='__vazio__' && r.estadoContato) return false;
       if(activeEstadoFilter && activeEstadoFilter!=='__vazio__' && r.estadoContato!==activeEstadoFilter) return false;
@@ -900,10 +907,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function rowHtml(r, mode){
     // mode: 'view' | 'edit' | 'delete'
-    // Só 2 cores: azul para quem está além dos ALERT_WINDOW_DAYS dias (futuro
-    // tranquilo); rosa para tudo o resto — dentro da janela de alerta, já
-    // vencido, sem data, ou sem fidelização/sem serviços.
-    const badgeClass = r.status==='futuro' ? 'blue' : 'pink';
+    const badgeClass = r.colorGroup;
     const listaAmarela = r.situacaoEspecial === 'Lista Amarela';
     const rowClass = 'row-'+badgeClass + (listaAmarela?' lista-amarela':'') + (mode==='edit'?' editing':'') + (mode==='delete'?' deleting':'');
     if(mode!=='edit'){
@@ -1174,6 +1178,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         const days = rec.fimDate ? Math.round((rec.fimDate - today)/86400000) : Infinity;
         const s = statusFromDays(days, rec.fimRaw, situacaoEspecial);
         rec.days = days; rec.status = s.status; rec.statusLabel = s.statusLabel; rec.expired = s.expired;
+        rec.colorGroup = colorGroupOf(s.status);
         rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial).toLowerCase());
       }
       editingRowNum = null;
@@ -1292,7 +1297,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         localidade, contato, email, telemovel, observacoes,
         estadoContato, estadoData, situacaoEspecial,
         fimDate, fimRaw: fim || null, proxDate, proxRaw: prox || null,
-        status: s.status, statusLabel: s.statusLabel, expired: s.expired, days
+        status: s.status, statusLabel: s.statusLabel, expired: s.expired, colorGroup: colorGroupOf(s.status), days
       };
       rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial).toLowerCase());
       records.unshift(rec);
