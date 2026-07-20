@@ -13,6 +13,7 @@
   --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#d03b3b;
   --good-bg:#e7f7e7; --warning-bg:#fff4de; --serious-bg:#fdece4; --critical-bg:#fbe4e4;
   --muted-bg:#eeede9; --blue:#2a78d6; --blue-bg:#e8f0fc;
+  --pink:#d6336c; --pink-bg:#fce4ef;
   --lista-amarela-bg:#fef08a;
 }
 @media (prefers-color-scheme: dark){
@@ -24,6 +25,7 @@
     --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#e66767;
     --good-bg:#123312; --warning-bg:#3a2c0c; --serious-bg:#3a2018; --critical-bg:#3a1717;
     --muted-bg:#2a2a28; --blue:#3987e5; --blue-bg:#152840;
+    --pink:#f472b6; --pink-bg:#3a1a2c;
     --lista-amarela-bg:#4a3f0a;
   }
 }
@@ -35,6 +37,7 @@
   --good:#0ca30c; --warning:#fab219; --serious:#ec835a; --critical:#e66767;
   --good-bg:#123312; --warning-bg:#3a2c0c; --serious-bg:#3a2018; --critical-bg:#3a1717;
   --muted-bg:#2a2a28; --blue:#3987e5; --blue-bg:#152840;
+  --pink:#f472b6; --pink-bg:#3a1a2c;
   --lista-amarela-bg:#4a3f0a;
 }
 *{box-sizing:border-box;}
@@ -156,14 +159,10 @@ tr.deleting{background:var(--critical-bg);}
   font-size:11.5px; font-weight:600; white-space:nowrap;
 }
 .badge .ico{width:7px; height:7px; border-radius:50%; flex-shrink:0;}
-.badge.critical{background:var(--critical-bg); color:var(--critical);}
-.badge.warning{background:var(--warning-bg); color:#8a5a00;}
-.badge.good{background:var(--blue-bg); color:var(--blue);}
-.badge.muted{background:var(--muted-bg); color:var(--text-secondary);}
-tr.row-critical td.dates{border-left:3px solid var(--critical); padding-left:9px;}
-tr.row-warning td.dates{border-left:3px solid var(--warning); padding-left:9px;}
-tr.row-good td.dates{border-left:3px solid var(--blue); padding-left:9px;}
-tr.row-muted td.dates{border-left:3px solid var(--baseline); padding-left:9px;}
+.badge.pink{background:var(--pink-bg); color:var(--pink);}
+.badge.blue{background:var(--blue-bg); color:var(--blue);}
+tr.row-pink td.dates{border-left:3px solid var(--pink); padding-left:9px;}
+tr.row-blue td.dates{border-left:3px solid var(--blue); padding-left:9px;}
 
 .situacao-pill{display:inline-block; padding:2px 9px; border-radius:100px; font-size:11.5px; font-weight:600; white-space:nowrap; margin-top:4px;}
 .situacao-pill.amarela{background:var(--lista-amarela-bg); color:#8a5a00;}
@@ -901,7 +900,10 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function rowHtml(r, mode){
     // mode: 'view' | 'edit' | 'delete'
-    const badgeClass = r.expired?'critical':r.status==='alerta'?'warning':r.status==='futuro'?'good':'muted';
+    // Só 2 cores: azul para quem está além dos ALERT_WINDOW_DAYS dias (futuro
+    // tranquilo); rosa para tudo o resto — dentro da janela de alerta, já
+    // vencido, sem data, ou sem fidelização/sem serviços.
+    const badgeClass = r.status==='futuro' ? 'blue' : 'pink';
     const listaAmarela = r.situacaoEspecial === 'Lista Amarela';
     const rowClass = 'row-'+badgeClass + (listaAmarela?' lista-amarela':'') + (mode==='edit'?' editing':'') + (mode==='delete'?' deleting':'');
     if(mode!=='edit'){
@@ -973,7 +975,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const situacaoOptionsHtml = ['<option value="">—</option>']
       .concat(SITUACAO_ESPECIAL_OPTIONS.map(opt=>`<option value="${esc(opt)}">${esc(opt)}</option>`))
       .join('');
-    return `<tr class="row-good new-record">
+    return `<tr class="row-blue new-record">
       <td><input type="text" class="nf-cliente" placeholder="Nome do cliente"></td>
       <td><input type="text" class="nf-nif" placeholder="NIF"></td>
       <td><input type="text" class="nf-tarifario" placeholder="Tarifário"></td>
