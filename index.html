@@ -904,7 +904,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           <span class="badge ${badgeClass}"><span class="ico"></span>${esc(r.statusLabel)}</span>
           <span class="days">${(r.fimDate && r.situacaoEspecial!=='Sem fidelização' && r.situacaoEspecial!=='Cliente Sem serviços')? fmtDate(r.fimDate) : ''}</span>
         </td>
-        <td class="dates">${r.proxDate? fmtDate(r.proxDate) : esc(r.proxRaw||'—')}</td>
+        <td class="dates">${r.situacaoEspecial ? '—' : (r.proxDate? fmtDate(r.proxDate) : esc(r.proxRaw||'—'))}</td>
         <td class="estado">${r.estadoContato
           ? `<span class="estado-pill">${esc(r.estadoContato)}</span><span class="estado-date">${r.estadoData? fmtDate(parseISO(r.estadoData)) : ''}</span>`
           : (situacaoPillHtml ? '' : '—')}${situacaoPillHtml}</td>
@@ -934,7 +934,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       <td><input type="date" class="f-prox" value="${proxVal}" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização"></td>
       <td class="estado-edit">
         <select class="f-estado">${estadoOptionsHtml}</select>
-        <select class="f-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo.">${situacaoOptionsHtml}</select>
+        <select class="f-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
       </td>
       <td><textarea class="f-obs">${esc(r.observacoes==='—'?'':r.observacoes)}</textarea></td>
       <td class="actions">
@@ -965,7 +965,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       <td><input type="date" class="nf-prox" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização"></td>
       <td class="estado-edit">
         <select class="nf-estado">${estadoOptionsHtml}</select>
-        <select class="nf-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo.">${situacaoOptionsHtml}</select>
+        <select class="nf-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
       </td>
       <td><textarea class="nf-obs" placeholder="Observações"></textarea></td>
       <td class="actions">
@@ -1008,6 +1008,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           if(proxInp && fimVal) proxInp.value = isoMinusDays(fimVal, PROX_REFID_DAYS_BEFORE_FIM);
         });
         newTr.querySelector('.nf-situacao').addEventListener('change', (e)=>{
+          if(SITUACAO_ESPECIAL_OPTIONS.includes(e.target.value)){
+            // Todas as situações especiais limpam a Próx. refidelização — já
+            // não faz sentido alertar para uma refidelização que não vai
+            // acontecer (ou que já está sinalizada de outra forma).
+            newTr.querySelector('.nf-prox').value = '';
+          }
           if(e.target.value === 'Sem fidelização' || e.target.value === 'Cliente Sem serviços'){
             newTr.querySelector('.nf-fim').value = '';
           }
@@ -1047,11 +1053,16 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       });
       // "Sem fidelização" e "Cliente Sem serviços" limpam logo a data de Fim
       // de fidelização no formulário — ao gravar, a folha fica com a data em
-      // branco, tal como pedido.
+      // branco, tal como pedido. Qualquer situação especial (incluindo Lista
+      // Amarela) limpa também a Próx. refidelização.
       tableWrap.querySelectorAll('.f-situacao').forEach(sel=>{
         sel.addEventListener('change', (e)=>{
+          const tr = e.target.closest('tr');
+          if(SITUACAO_ESPECIAL_OPTIONS.includes(e.target.value)){
+            const proxInp = tr.querySelector('.f-prox');
+            if(proxInp) proxInp.value = '';
+          }
           if(e.target.value === 'Sem fidelização' || e.target.value === 'Cliente Sem serviços'){
-            const tr = e.target.closest('tr');
             const fimInp = tr.querySelector('.f-fim');
             if(fimInp) fimInp.value = '';
           }
@@ -1680,7 +1691,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     filtered.forEach(r=>{
       aoa.push([r.cliente,r.nif,r.tarifario,r.subagente,r.contato,r.telemovel,r.email,r.localidade,
         r.fimDate? fmtDate(r.fimDate): (r.fimRaw||''), r.statusLabel,
-        r.proxDate? fmtDate(r.proxDate): (r.proxRaw||''),
+        r.situacaoEspecial ? '' : (r.proxDate? fmtDate(r.proxDate): (r.proxRaw||'')),
         r.estadoContato||'', r.estadoData? fmtDate(parseISO(r.estadoData)): '',
         r.situacaoEspecial||'',
         r.observacoes]);
