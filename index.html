@@ -433,15 +433,23 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   }
   // Mantém a fórmula da folha Excel original ("=(D-180)"): a próxima
   // refidelização é, por omissão, a data de fim de fidelização menos 180
-  // dias (~6 meses). Exceção: o tarifário "M Movel" refidelização com 90 dias.
+  // dias (~6 meses). Exceção: tarifários "M Movel" e "Shift" (qualquer
+  // tarifário que tenha "SHIFT" no nome) usam 90 dias.
   const PROX_REFID_DAYS_BEFORE_FIM = 180;
   const PROX_REFID_DAYS_BEFORE_FIM_M_MOVEL = 90;
   function isMMovelTarifario(tarifario){
     const norm = stripAccents(String(tarifario||'').trim().toUpperCase());
     return norm === 'M MOVEL' || norm.startsWith('M MOVEL ');
   }
+  function isShiftTarifario(tarifario){
+    // "tudo o que diga SHIFT" -> comparação por conteúdo (aparece em
+    // qualquer parte do nome do tarifário), sem distinguir maiúsculas/
+    // minúsculas nem acentos.
+    const norm = stripAccents(String(tarifario||'').trim().toUpperCase());
+    return norm.includes('SHIFT');
+  }
   function proxRefidDays(tarifario){
-    return isMMovelTarifario(tarifario) ? PROX_REFID_DAYS_BEFORE_FIM_M_MOVEL : PROX_REFID_DAYS_BEFORE_FIM;
+    return (isMMovelTarifario(tarifario) || isShiftTarifario(tarifario)) ? PROX_REFID_DAYS_BEFORE_FIM_M_MOVEL : PROX_REFID_DAYS_BEFORE_FIM;
   }
   function isoMinusDays(iso, days){
     const d = parseISO(iso);
@@ -451,7 +459,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     return `${y}-${m}-${dd}`;
   }
   // Recalcula a Próx. refidelização a partir da Fim de fidelização e do
-  // tarifário atualmente escrito na linha (M Movel -> 90 dias, resto -> 180).
+  // tarifário atualmente escrito na linha (M Movel ou Shift -> 90 dias, resto -> 180).
   // Não mexe em nada se houver uma situação especial selecionada, para não
   // sobrepor o valor que essa opção já limpou de propósito.
   function autoRecomputeProx(tr, prefix){
@@ -971,7 +979,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       </td>
       <td><input type="text" class="f-localidade" value="${esc(r.localidade)}"></td>
       <td><input type="date" class="f-fim" value="${fimVal}"></td>
-      <td><input type="date" class="f-prox" value="${proxVal}" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização (90 dias no tarifário M Movel)"></td>
+      <td><input type="date" class="f-prox" value="${proxVal}" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização (90 dias nos tarifários M Movel e Shift)"></td>
       <td class="estado-edit">
         <select class="f-estado">${estadoOptionsHtml}</select>
         <select class="f-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
@@ -1002,7 +1010,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       </td>
       <td><input type="text" class="nf-localidade" placeholder="Localidade"></td>
       <td><input type="date" class="nf-fim"></td>
-      <td><input type="date" class="nf-prox" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização (90 dias no tarifário M Movel)"></td>
+      <td><input type="date" class="nf-prox" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização (90 dias nos tarifários M Movel e Shift)"></td>
       <td class="estado-edit">
         <select class="nf-estado">${estadoOptionsHtml}</select>
         <select class="nf-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
@@ -1082,7 +1090,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       });
       // Tal como na folha Excel original, mudar a data de Fim de fidelização
       // (ou o tarifário) recalcula automaticamente a Próxima refidelização —
-      // 180 dias antes do fim, exceto no tarifário "M Movel", que usa 90 dias.
+      // 180 dias antes do fim, exceto nos tarifários "M Movel" e "Shift", que usam 90 dias.
       tableWrap.querySelectorAll('.f-fim').forEach(inp=>{
         inp.addEventListener('change', ()=> autoRecomputeProx(inp.closest('tr'), 'f'));
       });
