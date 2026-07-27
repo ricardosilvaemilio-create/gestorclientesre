@@ -375,6 +375,10 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           </div>
           <p class="proposal-grid-hint">Arrasta o limite direito de qualquer coluna para a alargares ou estreitares.</p>
           <div id="proposalGridWrap"></div>
+          <div class="field" style="margin-top:14px;">
+            <label for="proposalClosing">Texto de fecho do e-mail (aparece depois do quadro)</label>
+            <textarea id="proposalClosing" rows="8" style="width:100%;font-family:inherit;font-size:13px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text-primary);resize:vertical;"></textarea>
+          </div>
         </div>
         <div class="modal-footer">
           <span id="proposalStatus" class="proposal-status"></span>
@@ -406,7 +410,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // coluna T (têm de existir na folha — ver Code.gs).
 
   // Hipóteses do "Estado do contacto" — para adicionar mais opções, acrescenta aqui.
-  const ESTADO_OPTIONS = ['Em negociação', 'Aguardo documentação', 'Concluído'];
+  const ESTADO_OPTIONS = ['Em negociação', 'Proposta enviada', 'Concluído'];
   // Situação especial do cliente. "Sem fidelização" e "Cliente Sem serviços"
   // fazem o cliente contar sempre no bucket "Sem fidelização" (independente
   // da data) e limpam a data de Fim de fidelização ao serem escolhidas no
@@ -1370,6 +1374,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   const DEFAULT_PROPOSAL_INTRO = 'Bom dia,\n\nO meu nome é Rui Emílio, sou gestor de clientes Empresariais da MEO Empresas.\nEstando o Exmº Senhor identificado como administrador de conta Meo do cliente acima mencionado, venho na qualidade de Gestor Certificado MEO Empresas apresentar proposta com vista à renovação do serviço M4.\nContrato já se encontra em renovação (pode vir a perder os descontos associados assim que termine a fidelização).\nA proposta apresentada em anexo reflete uma redução no valor da mensalidade contratada, mantendo inalterados os serviços existentes.\n\nAumento da NET FIXA para 1000/400 Mbps\nRedução na mensalidade de 5,29€\n\nNo quadro abaixo seguem proposta de renegociação do vosso contrato MEO Empresas, através de uma tabela comparativa entre os serviços que tem atualmente e os serviços que estou a propor, destacando, a fundo azul, os benefícios, descontos e ofertas.';
   const DEFAULT_PROPOSAL_OUTRO = 'Caso concorde com as condições, responda a este e-mail a indicar que aceita as novas condições.';
+  const DEFAULT_PROPOSAL_CLOSING = 'Sendo que a MEO já se encontra no mercado da Energia, pedia-vos sem compromisso o envio da vossa fatura do atual comercializador de energia para fazer uma simulação tendo como objectivo verificar uma eventual poupança que possa haver!\n\nCaso pretenda algum tipo de alteração à proposta apresentada, diga-me por favor, de forma a corrigir e enquadrar dentro das vossas necessidades.\n\nAos valores apresentados acresce IVA à taxa legal em vigor. Preços em vigor à data de hoje; O valor da mensalidade não contempla o de aumentos de preços anuais, subscrições, waiting rings, cartões de partilha de internet, add-ons, consumos extra-plafond ou compras de conteúdos na store digital. + Fidelização a 36 Meses\n\nNo caso de aceitar estas condições irá receber um SMS do remetente MEO Empresas / email do remetente noreply@meo.pt para fazer a sua aceitação das novas condições. No link, poderá descarregar os impressos da renovação, para que fiquem em sua posse. Basta clicar em “Clique Aqui” no email, e posteriormente no botão “Aceitar”.\n\nCatálogo de equipamentos: https://portfolio.meoempresas.pt/catalogo-de-equipamentos1/';
   // Largura do e-mail de proposta (em pixels) — a tabela e o texto de
   // introdução/fecho usam sempre a mesma largura, para o e-mail ler-se como
   // um bloco só, em vez de o texto ficar mais estreito que a tabela.
@@ -1383,6 +1388,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     document.getElementById('proposalTemplateSelect').value = '';
     document.getElementById('proposalIntro').value = DEFAULT_PROPOSAL_INTRO;
     document.getElementById('proposalOutro').value = DEFAULT_PROPOSAL_OUTRO;
+    document.getElementById('proposalClosing').value = DEFAULT_PROPOSAL_CLOSING;
     document.getElementById('proposalGridWrap').innerHTML = '';
     document.getElementById('proposalSendBtn').disabled = true;
     document.getElementById('proposalSendBtn').textContent = 'Enviar por e-mail ao cliente';
@@ -1649,10 +1655,17 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   function buildProposalEmailHtml(){
     const intro = document.getElementById('proposalIntro').value;
     const outro = document.getElementById('proposalOutro').value;
+    const closing = document.getElementById('proposalClosing').value;
     let html = '';
     if(intro.trim()) html += paragraphsBlockToHtml(intro);
     if(outro.trim()) html += paragraphsBlockToHtml(outro, {bold:true});
     html += proposalGridToHtml();
+    // Texto de fecho — pedido do utilizador para ir "por baixo do quadro"
+    // (depois da tabela, ao contrário do texto de abertura/confirmação,
+    // que ficam sempre antes). Reaproveita o mesmo mecanismo de parágrafos
+    // (sem cor de fundo, só negrito quando pedido) para se manter
+    // consistente com o resto do e-mail.
+    if(closing.trim()) html += paragraphsBlockToHtml(closing);
     return html;
   }
 
