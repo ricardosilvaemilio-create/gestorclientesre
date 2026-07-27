@@ -1368,7 +1368,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // adivinhada para todas as folhas.
   let currentProposalColWidths = null;
 
-  const DEFAULT_PROPOSAL_INTRO = 'Espero que se encontre bem.\n\nConforme combinado, envio proposta de renegociação ao contrato MEO Empresas, através de uma tabela comparativa entre os serviços que tem atualmente e os serviços que estou a propor, destacando, a fundo azul, os benefícios.';
+  const DEFAULT_PROPOSAL_INTRO = 'Bom dia,\n\nO meu nome é Rui Emílio, sou gestor de clientes Empresariais da MEO Empresas.\nEstando o Exmº Senhor identificado como administrador de conta Meo do cliente acima mencionado, venho na qualidade de Gestor Certificado MEO Empresas apresentar proposta com vista à renovação do serviço M4.\nContrato já se encontra em renovação (pode vir a perder os descontos associados assim que termine a fidelização).\nA proposta apresentada em anexo reflete uma redução no valor da mensalidade contratada, mantendo inalterados os serviços existentes.\n\nAumento da NET FIXA para 1000/400 Mbps\nRedução na mensalidade de 5,29€\n\nNo quadro abaixo seguem proposta de renegociação do vosso contrato MEO Empresas, através de uma tabela comparativa entre os serviços que tem atualmente e os serviços que estou a propor, destacando, a fundo azul, os benefícios, descontos e ofertas.';
   const DEFAULT_PROPOSAL_OUTRO = 'Caso concorde com as condições, responda a este e-mail a indicar que aceita as novas condições.';
   // Largura do e-mail de proposta (em pixels) — a tabela e o texto de
   // introdução/fecho usam sempre a mesma largura, para o e-mail ler-se como
@@ -1668,7 +1668,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     setProposalStatus('A enviar…');
 
     const html = buildProposalEmailHtml();
-    const subject = `Proposta ${sheetName} — ${proposalRec.cliente}`;
+    // NIF logo a seguir ao tarifário — pedido do utilizador ("no assunto
+    // pretendo que apareça o NIF do cliente") — assim fica sempre visível
+    // mesmo que o cliente de e-mail corte assuntos longos (nomes de
+    // empresa podem ser compridos, ver ex. "MARIA MANUELA AGUIAR ESTEVÃO
+    // SOC UNIP LDA"), em vez de ficar escondido no fim.
+    const subject = `Proposta ${sheetName} — NIF ${proposalRec.nif || '—'} — ${proposalRec.cliente}`;
 
     fetch(API_URL, {
       method:'POST',
