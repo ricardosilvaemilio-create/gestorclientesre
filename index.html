@@ -548,13 +548,13 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // Atualiza a barra de progresso e o texto do ecrã de carregamento inicial.
   // Sem total conhecido ainda (primeira página a caminho), mostra uma
   // percentagem mínima só para dar sensação de movimento.
-  function setLoadingProgress(count, total){
+  function setLoadingProgress(count, total, customText){
     const pct = total ? Math.min(100, Math.max(6, Math.round(count/total*100))) : 6;
     if(loadingBarFill) loadingBarFill.style.width = pct + '%';
     if(loadingText){
-      loadingText.textContent = count
+      loadingText.textContent = customText || (count
         ? ('A carregar dados… ' + count.toLocaleString('pt-PT') + (total ? (' / '+total.toLocaleString('pt-PT')) : ''))
-        : 'A carregar dados…';
+        : 'A carregar dados…');
     }
   }
 
@@ -648,11 +648,43 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   function loadData(firstLoad){
     setSyncState('saving');
     const allRows = [];
+    // Uma ligação completa faz vários pedidos seguidos ao Apps Script, um por
+    // página de ~2000 clientes (ex: com 15 500 clientes são ~8 pedidos). Sem
+    // nenhuma tentativa de repetição, bastava UM destes pedidos falhar por um
+    // motivo passageiro (o Apps Script devolver por instantes uma página de
+    // erro do Google em vez de JSON, uma rede mais lenta, etc.) para a ligação
+    // inteira falhar — o que explica sintomas do tipo "às vezes entra, às
+    // vezes não" mesmo com o URL/token/acesso todos corretos. Cada página
+    // agora tenta até 4 vezes (1ª tentativa + 3 repetições, com pequena
+    // pausa a aumentar entre elas) antes de desistir e mostrar erro.
+    const MAX_ATTEMPTS = 4;
+    const RETRY_DELAY_MS = 900;
+    const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
-    function fetchPage(offset){
+    function fetchPageJson(offset, attempt){
       const url = API_URL + '?token=' + encodeURIComponent(TOKEN) + '&offset=' + offset;
       return fetch(url, {method:'GET'})
         .then(r=>r.json())
+        .catch(networkOrParseErr=>{
+          // fetch falhou (rede) OU a resposta não era JSON válido (ex: página
+          // HTML de erro temporária do Google a meio da sequência de pedidos)
+          // — tratamos como falha passageira e tentamos outra vez, em vez de
+          // abortar logo a ligação inteira.
+          if(attempt < MAX_ATTEMPTS){
+            const progressText = 'Falha temporária, a tentar novamente… (' + attempt + '/' + (MAX_ATTEMPTS-1) + ')';
+            setLoadingProgress(allRows.length, null, progressText);
+            const sl = document.getElementById('summaryLine');
+            if(sl) sl.textContent = progressText;
+            return sleep(RETRY_DELAY_MS * attempt).then(()=>fetchPageJson(offset, attempt+1));
+          }
+          const transientErr = new Error('sem resposta válida do servidor depois de ' + MAX_ATTEMPTS + ' tentativas — parece ter sido uma falha passageira, tenta ligar outra vez');
+          transientErr.transient = true;
+          throw transientErr;
+        });
+    }
+
+    function fetchPage(offset){
+      return fetchPageJson(offset, 1)
         .then(data=>{
           if(data.ok === false){
             throw new Error(data.error || 'erro desconhecido');
@@ -692,7 +724,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         if(firstLoad){
           loadingScreen.classList.add('hidden');
           gate.classList.remove('hidden');
-          gateError.textContent = 'Não foi possível ligar: ' + err.message + '. Confirma o URL, o token, e se a implementação está com acesso "Qualquer pessoa".';
+          gateError.textContent = err.transient
+            ? ('Não foi possível ligar: ' + err.message + '.')
+            : ('Não foi possível ligar: ' + err.message + '. Confirma o URL, o token, e se a implementação está com acesso "Qualquer pessoa".');
           gateError.classList.add('show');
           document.getElementById('connectBtn').disabled = false;
           document.getElementById('connectBtn').textContent = 'Ligar';
