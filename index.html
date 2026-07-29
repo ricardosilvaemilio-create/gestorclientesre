@@ -101,7 +101,7 @@ h1{font-size:20px; margin:0 0 4px;}
 .sync-dot.error{background:var(--critical);}
 
 #tableWrap{overflow-x:auto;}
-table{width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; border:1px solid var(--border); min-width:1100px;}
+table{width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; border:1px solid var(--border);}
 thead th{
   text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.02em; color:var(--text-muted);
   padding:10px 12px; border-bottom:1px solid var(--grid); cursor:pointer; white-space:nowrap; user-select:none;
@@ -113,14 +113,14 @@ tbody tr{border-bottom:1px solid var(--grid);}
 tbody tr:last-child{border-bottom:none;}
 tbody tr:hover{background:var(--muted-bg);}
 td{padding:10px 12px; vertical-align:top; font-size:13px;}
-td.cliente{font-weight:600; max-width:220px;}
+td.cliente{font-weight:600; max-width:320px;}
+.mensalidade-line{display:block; font-size:11px; color:var(--text-muted); font-weight:400; margin-top:3px; white-space:nowrap;}
 td.contact{font-size:12px; color:var(--text-secondary); max-width:170px;}
 td.contact div{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 td.obs{max-width:280px; color:var(--text-secondary); font-size:12.5px;}
 td.dates{white-space:nowrap; font-variant-numeric:tabular-nums; font-size:12.5px;}
 td.dates .days{display:block; font-size:11px; margin-top:2px;}
 td.estado{white-space:nowrap; font-size:12.5px;}
-td.num{white-space:nowrap; font-variant-numeric:tabular-nums; font-size:12.5px; text-align:right;}
 
 .obs-text{white-space:pre-wrap; min-height:18px; border-radius:6px; padding:3px 5px; margin:-3px -5px;}
 .estado-pill{
@@ -143,6 +143,8 @@ td textarea{
   font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary); resize:vertical;
 }
 .contact-edit{display:flex; flex-direction:column; gap:4px;}
+.mensalidade-edit-line{display:flex; gap:4px; margin-top:5px;}
+.mensalidade-edit-line input{flex:1 1 auto; width:auto; min-width:62px; font-size:11px; padding:4px 5px;}
 td.actions{white-space:nowrap; min-width:130px;}
 .edit-row-btn, .save-row-btn, .cancel-row-btn, .delete-row-btn, .delete-confirm-btn, .delete-cancel-btn{
   font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--baseline);
@@ -983,9 +985,6 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     {key:'fimDate', label:'Fim fidelização / estado'},
     {key:'proxDate', label:'Próx. refidelização'},
     {key:'estadoContato', label:'Estado do contacto'},
-    {key:'mensalidadeAtual', label:'Mensalidade atual'},
-    {key:'mensalidadeProposta', label:'Mensalidade Proposta'},
-    {key:'ponderador', label:'Ponderador'},
     {key:'obs', label:'Observações', nosort:true},
     {key:'actions', label:'', nosort:true},
   ];
@@ -1020,8 +1019,15 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       const situacaoPillHtml = r.situacaoEspecial
         ? `<span class="situacao-pill ${listaAmarela?'amarela':'semfid'}">${esc(r.situacaoEspecial)}</span>`
         : '';
+      const mensalidadeBits = [];
+      if(r.mensalidadeAtual) mensalidadeBits.push(`Atual ${fmtEuro(r.mensalidadeAtual)}`);
+      if(r.mensalidadeProposta) mensalidadeBits.push(`Proposta ${fmtEuro(r.mensalidadeProposta)}`);
+      if(r.ponderador) mensalidadeBits.push(`Pond. ${fmtNumber(r.ponderador)}`);
+      const mensalidadeLineHtml = mensalidadeBits.length
+        ? `<span class="mensalidade-line">${mensalidadeBits.join(' · ')}</span>`
+        : '';
       return `<tr class="${rowClass}" data-row="${r.rowNum}">
-        <td class="cliente">${esc(r.cliente)}</td>
+        <td class="cliente">${esc(r.cliente)}${mensalidadeLineHtml}</td>
         <td>${esc(r.nif||'—')}</td>
         <td>${esc(r.tarifario||'—')}</td>
         <td class="contact">${contactBits.map(c=>`<div>${esc(c)}</div>`).join('') || '—'}</td>
@@ -1034,9 +1040,6 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <td class="estado">${r.estadoContato
           ? `<span class="estado-pill">${esc(r.estadoContato)}</span><span class="estado-date">${r.estadoData? fmtDate(parseISO(r.estadoData)) : ''}</span>`
           : (situacaoPillHtml ? '' : '—')}${situacaoPillHtml}</td>
-        <td class="num">${fmtEuro(r.mensalidadeAtual)}</td>
-        <td class="num">${fmtEuro(r.mensalidadeProposta)}</td>
-        <td class="num">${fmtNumber(r.ponderador)}</td>
         <td class="obs"><div class="obs-text">${esc(r.observacoes||'—')}</div></td>
         <td class="actions">${actionsHtml}</td>
       </tr>`;
@@ -1050,7 +1053,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       .concat(SITUACAO_ESPECIAL_OPTIONS.map(opt=>`<option value="${esc(opt)}"${r.situacaoEspecial===opt?' selected':''}>${esc(opt)}</option>`))
       .join('');
     return `<tr class="${rowClass}" data-row="${r.rowNum}">
-      <td><input type="text" class="f-cliente" value="${esc(r.cliente)}"></td>
+      <td>
+        <input type="text" class="f-cliente" value="${esc(r.cliente)}">
+        <div class="mensalidade-edit-line">
+          <input type="text" inputmode="decimal" class="f-mensalidade-atual num-input" placeholder="Atual €" value="${esc(r.mensalidadeAtual)}">
+          <input type="text" inputmode="decimal" class="f-mensalidade-proposta num-input" placeholder="Proposta €" value="${esc(r.mensalidadeProposta)}">
+          <input type="text" inputmode="decimal" class="f-ponderador num-input" placeholder="Pond." value="${esc(r.ponderador)}">
+        </div>
+      </td>
       <td><input type="text" class="f-nif" value="${esc(r.nif)}"></td>
       <td><input type="text" class="f-tarifario" value="${esc(r.tarifario)}"></td>
       <td class="contact-edit">
@@ -1065,9 +1075,6 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <select class="f-estado">${estadoOptionsHtml}</select>
         <select class="f-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
       </td>
-      <td><input type="text" inputmode="decimal" class="f-mensalidade-atual num-input" placeholder="€" value="${esc(r.mensalidadeAtual)}"></td>
-      <td><input type="text" inputmode="decimal" class="f-mensalidade-proposta num-input" placeholder="€" value="${esc(r.mensalidadeProposta)}"></td>
-      <td><input type="text" inputmode="decimal" class="f-ponderador num-input" value="${esc(r.ponderador)}"></td>
       <td><textarea class="f-obs">${esc(r.observacoes==='—'?'':r.observacoes)}</textarea></td>
       <td class="actions">
         <button class="save-row-btn" type="button">Guardar</button>
@@ -1084,7 +1091,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       .concat(SITUACAO_ESPECIAL_OPTIONS.map(opt=>`<option value="${esc(opt)}">${esc(opt)}</option>`))
       .join('');
     return `<tr class="row-blue new-record">
-      <td><input type="text" class="nf-cliente" placeholder="Nome do cliente"></td>
+      <td>
+        <input type="text" class="nf-cliente" placeholder="Nome do cliente">
+        <div class="mensalidade-edit-line">
+          <input type="text" inputmode="decimal" class="nf-mensalidade-atual num-input" placeholder="Atual €">
+          <input type="text" inputmode="decimal" class="nf-mensalidade-proposta num-input" placeholder="Proposta €">
+          <input type="text" inputmode="decimal" class="nf-ponderador num-input" placeholder="Pond.">
+        </div>
+      </td>
       <td><input type="text" class="nf-nif" placeholder="NIF"></td>
       <td><input type="text" class="nf-tarifario" placeholder="Tarifário"></td>
       <td class="contact-edit">
@@ -1099,9 +1113,6 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <select class="nf-estado">${estadoOptionsHtml}</select>
         <select class="nf-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
       </td>
-      <td><input type="text" inputmode="decimal" class="nf-mensalidade-atual num-input" placeholder="€"></td>
-      <td><input type="text" inputmode="decimal" class="nf-mensalidade-proposta num-input" placeholder="€"></td>
-      <td><input type="text" inputmode="decimal" class="nf-ponderador num-input"></td>
       <td><textarea class="nf-obs" placeholder="Observações"></textarea></td>
       <td class="actions">
         <button class="create-save-btn" type="button">Guardar</button>
