@@ -115,6 +115,7 @@ tbody tr:hover{background:var(--muted-bg);}
 td{padding:10px 12px; vertical-align:top; font-size:13px;}
 td.cliente{font-weight:600; max-width:320px;}
 .mensalidade-line{display:block; font-size:11px; color:var(--text-muted); font-weight:400; margin-top:3px; white-space:nowrap;}
+.comissao-line{color:var(--good); font-weight:700;}
 td.contact{font-size:12px; color:var(--text-secondary); max-width:170px;}
 td.contact div{white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
 td.obs{max-width:280px; color:var(--text-secondary); font-size:12.5px;}
@@ -145,6 +146,8 @@ td textarea{
 .contact-edit{display:flex; flex-direction:column; gap:4px;}
 .mensalidade-edit-line{display:flex; gap:4px; margin-top:5px;}
 .mensalidade-edit-line input{flex:1 1 auto; width:auto; min-width:62px; font-size:11px; padding:4px 5px;}
+.comissao-preview{font-size:11px; color:var(--text-secondary); margin-top:5px;}
+.comissao-preview .f-comissao-val, .comissao-preview .nf-comissao-val{font-weight:700; color:var(--good);}
 td.actions{white-space:nowrap; min-width:130px;}
 .edit-row-btn, .save-row-btn, .cancel-row-btn, .delete-row-btn, .delete-confirm-btn, .delete-cancel-btn{
   font-size:11px; padding:3px 8px; border-radius:6px; border:1px solid var(--baseline);
@@ -450,6 +453,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     if(n===null) return raw ? esc(String(raw)) : '—';
     return n.toLocaleString('pt-PT', {maximumFractionDigits:2});
   }
+  // Comissão = Mensalidade Proposta × Ponderador. Só devolve um valor quando os
+  // dois estão preenchidos e são números válidos — senão null, para o chamador
+  // decidir não mostrar nada (evita "Comissão 0,00 €" enganador quando falta info).
+  function comissaoDe(propostaRaw, ponderadorRaw){
+    const p = parseNum(propostaRaw), w = parseNum(ponderadorRaw);
+    if(p===null || w===null) return null;
+    return p * w;
+  }
   function fmtDate(d){
     if(!d) return '—';
     const dd = String(d.getDate()).padStart(2,'0');
@@ -502,6 +513,17 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     if(!fimInp || !proxInp || !fimInp.value) return;
     const tarifInp = tr.querySelector('.'+prefix+'-tarifario');
     proxInp.value = isoMinusDays(fimInp.value, proxRefidDays(tarifInp? tarifInp.value : ''));
+  }
+  // Atualiza a pré-visualização da Comissão (Proposta × Ponderador) em tempo
+  // real, enquanto o utilizador escreve num dos dois campos — mesmo padrão do
+  // autoRecomputeProx acima, mas não grava nada, é só um valor mostrado.
+  function updateComissaoPreview(tr, prefix){
+    const out = tr.querySelector('.'+prefix+'-comissao-val');
+    if(!out) return;
+    const propInp = tr.querySelector('.'+prefix+'-mensalidade-proposta');
+    const pondInp = tr.querySelector('.'+prefix+'-ponderador');
+    const val = comissaoDe(propInp? propInp.value : '', pondInp? pondInp.value : '');
+    out.textContent = val!==null ? fmtEuro(val) : '—';
   }
   function esc(s){
     return String(s==null? '': s).replace(/[&<>"']/g, m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
@@ -1026,8 +1048,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       const mensalidadeLineHtml = mensalidadeBits.length
         ? `<span class="mensalidade-line">${mensalidadeBits.join(' · ')}</span>`
         : '';
+      const comissaoValView = comissaoDe(r.mensalidadeProposta, r.ponderador);
+      const comissaoLineHtml = comissaoValView!==null
+        ? `<span class="mensalidade-line comissao-line">Comissão ${fmtEuro(comissaoValView)}</span>`
+        : '';
       return `<tr class="${rowClass}" data-row="${r.rowNum}">
-        <td class="cliente">${esc(r.cliente)}${mensalidadeLineHtml}</td>
+        <td class="cliente">${esc(r.cliente)}${mensalidadeLineHtml}${comissaoLineHtml}</td>
         <td>${esc(r.nif||'—')}</td>
         <td>${esc(r.tarifario||'—')}</td>
         <td class="contact">${contactBits.map(c=>`<div>${esc(c)}</div>`).join('') || '—'}</td>
@@ -1046,6 +1072,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     }
     const fimVal = toDateInputValue(r.fimDate, r.fimRaw);
     const proxVal = toDateInputValue(r.proxDate, r.proxRaw);
+    const comissaoInitVal = comissaoDe(r.mensalidadeProposta, r.ponderador);
+    const comissaoInitHtml = comissaoInitVal!==null ? fmtEuro(comissaoInitVal) : '—';
     const estadoOptionsHtml = ['<option value="">Sem estado</option>']
       .concat(ESTADO_OPTIONS.map(opt=>`<option value="${esc(opt)}"${r.estadoContato===opt?' selected':''}>${esc(opt)}</option>`))
       .join('');
@@ -1060,6 +1088,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           <input type="text" inputmode="decimal" class="f-mensalidade-proposta num-input" placeholder="Proposta €" value="${esc(r.mensalidadeProposta)}">
           <input type="text" inputmode="decimal" class="f-ponderador num-input" placeholder="Pond." value="${esc(r.ponderador)}">
         </div>
+        <div class="comissao-preview">Comissão <span class="f-comissao-val">${comissaoInitHtml}</span></div>
       </td>
       <td><input type="text" class="f-nif" value="${esc(r.nif)}"></td>
       <td><input type="text" class="f-tarifario" value="${esc(r.tarifario)}"></td>
@@ -1098,6 +1127,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           <input type="text" inputmode="decimal" class="nf-mensalidade-proposta num-input" placeholder="Proposta €">
           <input type="text" inputmode="decimal" class="nf-ponderador num-input" placeholder="Pond.">
         </div>
+        <div class="comissao-preview">Comissão <span class="nf-comissao-val">—</span></div>
       </td>
       <td><input type="text" class="nf-nif" placeholder="NIF"></td>
       <td><input type="text" class="nf-tarifario" placeholder="Tarifário"></td>
@@ -1150,6 +1180,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         newTr.querySelector('.create-save-btn').addEventListener('click', (e)=> createRecord(newTr, e.currentTarget));
         newTr.querySelector('.nf-fim').addEventListener('change', ()=> autoRecomputeProx(newTr, 'nf'));
         newTr.querySelector('.nf-tarifario').addEventListener('change', ()=> autoRecomputeProx(newTr, 'nf'));
+        newTr.querySelector('.nf-mensalidade-proposta').addEventListener('input', ()=> updateComissaoPreview(newTr, 'nf'));
+        newTr.querySelector('.nf-ponderador').addEventListener('input', ()=> updateComissaoPreview(newTr, 'nf'));
         newTr.querySelector('.nf-situacao').addEventListener('change', (e)=>{
           if(SITUACAO_ESPECIAL_OPTIONS.includes(e.target.value)){
             // Todas as situações especiais limpam a Próx. refidelização — já
@@ -1194,6 +1226,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       });
       tableWrap.querySelectorAll('.f-tarifario').forEach(inp=>{
         inp.addEventListener('change', ()=> autoRecomputeProx(inp.closest('tr'), 'f'));
+      });
+      // Comissão (Proposta × Ponderador) — pré-visualização ao vivo enquanto
+      // se escreve num dos dois campos, ver updateComissaoPreview().
+      tableWrap.querySelectorAll('.f-mensalidade-proposta').forEach(inp=>{
+        inp.addEventListener('input', ()=> updateComissaoPreview(inp.closest('tr'), 'f'));
+      });
+      tableWrap.querySelectorAll('.f-ponderador').forEach(inp=>{
+        inp.addEventListener('input', ()=> updateComissaoPreview(inp.closest('tr'), 'f'));
       });
       // "Sem fidelização" e "Cliente Sem serviços" limpam logo a data de Fim
       // de fidelização no formulário — ao gravar, a folha fica com a data em
