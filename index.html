@@ -151,8 +151,9 @@ td textarea{
 .ponderador-edit-line input{width:100%; font-size:11px; padding:4px 5px;}
 .negocio-edit-line{display:flex; gap:4px; margin-top:5px;}
 .negocio-edit-line select{flex:1 1 auto; width:auto; min-width:0; font-size:11px; padding:4px 5px;}
-.negocio-datas-line{display:flex; gap:4px; margin-top:5px;}
-.negocio-datas-line select, .negocio-datas-line input{flex:1 1 auto; width:auto; min-width:0; font-size:11px; padding:4px 5px;}
+.conclusao-line{margin-top:6px;}
+.conclusao-label{display:block; font-size:10px; color:var(--text-secondary); margin-bottom:2px;}
+.conclusao-line input{width:100%; font-size:11px; padding:4px 5px;}
 .cliente-comissao-edit-line{display:flex; flex-direction:column; gap:4px; margin-top:5px;}
 .cliente-comissao-edit-line select{width:100%; font-size:11px; padding:4px 5px;}
 .comissao-preview{font-size:11px; color:var(--text-secondary); margin-top:5px;}
@@ -1398,12 +1399,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           <input type="text" inputmode="decimal" class="f-mensalidade-atual num-input" placeholder="Atual €" value="${esc(r.mensalidadeAtual)}">
           <input type="text" inputmode="decimal" class="f-mensalidade-proposta num-input" placeholder="Proposta €" value="${esc(r.mensalidadeProposta)}">
         </div>
-        <div class="negocio-edit-line" title="Tipo de negócio — usado para calcular o Ponderador automaticamente (plano comissional)">
+        <div class="negocio-edit-line" title="Tipo de negócio e Duração — usados para calcular o Ponderador automaticamente (plano comissional)">
           <select class="f-tipo-negocio">${tipoNegocioOptionsHtml}</select>
-        </div>
-        <div class="negocio-datas-line" title="Duração (meses) e Conclusão — a Conclusão + Duração define o novo Fim de Fidelização">
           <select class="f-duracao">${duracaoOptionsHtml}</select>
-          <input type="date" class="f-conclusao" placeholder="Conclusão" value="${esc(conclusaoVal)}">
         </div>
         <div class="comissao-preview">Comissão <span class="f-comissao-val">${comissaoInitHtml}</span></div>
       </td>
@@ -1424,7 +1422,13 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <input type="text" class="f-email" placeholder="E-mail" value="${esc(r.email)}">
       </td>
       <td><input type="date" class="f-fim" value="${fimVal}"></td>
-      <td><input type="date" class="f-prox" value="${proxVal}" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização (90 dias nos tarifários M Movel, Shift e BLM)"></td>
+      <td>
+        <input type="date" class="f-prox" value="${proxVal}" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização (90 dias nos tarifários M Movel, Shift e BLM)">
+        <div class="conclusao-line">
+          <label class="conclusao-label">Data Conclusão</label>
+          <input type="date" class="f-conclusao" value="${esc(conclusaoVal)}" title="Data em que a fidelização/renovação ficou concluída — em conjunto com a Duração (junto ao Tipo de negócio) define o novo Fim de fidelização">
+        </div>
+      </td>
       <td class="estado-edit">
         <select class="f-estado">${estadoOptionsHtml}</select>
         <select class="f-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
@@ -1468,12 +1472,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           <input type="text" inputmode="decimal" class="nf-mensalidade-atual num-input" placeholder="Atual €">
           <input type="text" inputmode="decimal" class="nf-mensalidade-proposta num-input" placeholder="Proposta €">
         </div>
-        <div class="negocio-edit-line" title="Tipo de negócio — usado para calcular o Ponderador automaticamente (plano comissional)">
+        <div class="negocio-edit-line" title="Tipo de negócio e Duração — usados para calcular o Ponderador automaticamente (plano comissional)">
           <select class="nf-tipo-negocio">${tipoNegocioOptionsHtml}</select>
-        </div>
-        <div class="negocio-datas-line" title="Duração (meses) e Conclusão — a Conclusão + Duração define o novo Fim de Fidelização">
           <select class="nf-duracao">${duracaoOptionsHtml}</select>
-          <input type="date" class="nf-conclusao" placeholder="Conclusão">
         </div>
         <div class="comissao-preview">Comissão <span class="nf-comissao-val">—</span></div>
       </td>
@@ -1494,7 +1495,13 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <input type="text" class="nf-email" placeholder="E-mail">
       </td>
       <td><input type="date" class="nf-fim"></td>
-      <td><input type="date" class="nf-prox" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização (90 dias nos tarifários M Movel, Shift e BLM)"></td>
+      <td>
+        <input type="date" class="nf-prox" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização (90 dias nos tarifários M Movel, Shift e BLM)">
+        <div class="conclusao-line">
+          <label class="conclusao-label">Data Conclusão</label>
+          <input type="date" class="nf-conclusao" title="Data em que a fidelização/renovação ficou concluída — em conjunto com a Duração (junto ao Tipo de negócio) define o novo Fim de fidelização">
+        </div>
+      </td>
       <td class="estado-edit">
         <select class="nf-estado">${estadoOptionsHtml}</select>
         <select class="nf-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
