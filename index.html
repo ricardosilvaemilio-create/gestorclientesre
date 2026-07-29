@@ -151,6 +151,8 @@ td textarea{
 .ponderador-edit-line input{width:100%; font-size:11px; padding:4px 5px;}
 .negocio-edit-line{display:flex; gap:4px; margin-top:5px;}
 .negocio-edit-line select{flex:1 1 auto; width:auto; min-width:0; font-size:11px; padding:4px 5px;}
+.negocio-datas-line{display:flex; gap:4px; margin-top:5px;}
+.negocio-datas-line select, .negocio-datas-line input{flex:1 1 auto; width:auto; min-width:0; font-size:11px; padding:4px 5px;}
 .cliente-comissao-edit-line{display:flex; flex-direction:column; gap:4px; margin-top:5px;}
 .cliente-comissao-edit-line select{width:100%; font-size:11px; padding:4px 5px;}
 .comissao-preview{font-size:11px; color:var(--text-secondary); margin-top:5px;}
@@ -424,8 +426,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   let page = 1;
   const pageSize = 50;
 
-  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data','situacao_especial','mensalidade_atual','mensalidade_proposta','ponderador','comissao','tipo_cliente','tipo_negocio','duracao_meses','categoria_comissao','num_produtos'];
-  // row array from Apps Script: [rowNum, A..AC] -> index i+1 = COLS[i]
+  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data','situacao_especial','mensalidade_atual','mensalidade_proposta','ponderador','comissao','tipo_cliente','tipo_negocio','duracao_meses','categoria_comissao','num_produtos','data_conclusao'];
+  // row array from Apps Script: [rowNum, A..AD] -> index i+1 = COLS[i]
   // estado_contato = coluna R, estado_data = coluna S, situacao_especial =
   // coluna T, mensalidade_atual = coluna U, mensalidade_proposta = coluna V,
   // ponderador = coluna W, comissao = coluna X, tipo_cliente = coluna Y
@@ -439,6 +441,10 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // destes 4 + Mensalidade Atual/Proposta, o painel calcula sozinho o
   // Ponderador (W) através de ponderadorAutomatico(), ver mais abaixo.
   // Continua tudo calculado no painel, nunca no Apps Script.
+  // data_conclusao = coluna AD (29/07/2026) — data em que uma refidelização
+  // ficou concluída. Somada com duracao_meses (AA) dá o novo Fim de
+  // fidelização (D), que por sua vez já recalcula a Próx. refidelização (C)
+  // pelas regras existentes — ver recomputeFimFidelizacao() mais abaixo.
 
   // Hipóteses do "Estado do contacto" — para adicionar mais opções, acrescenta aqui.
   const ESTADO_OPTIONS = ['Em negociação', 'Proposta enviada', 'Concluído'];
@@ -459,7 +465,13 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // se trata de um cliente novo (a Angariação não tem duração própria, por
   // isso usa sempre a Fidelização da duração escolhida para completar a soma).
   // Ver baseTabelaPrincipal() mais abaixo.
-  const TIPO_NEGOCIO_OPTIONS = ['Angariação + Fidelização', 'Fidelização', 'Refidelização'];
+  // "Fidelização" sozinha removida do dropdown a pedido do utilizador (mesmo
+  // dia, 29/07/2026) — só ficam "Angariação + Fidelização" e "Refidelização"
+  // como opções escolhíveis. O cálculo para "Fidelização" sozinha continua
+  // implementado em baseTabelaPrincipal() (não removido, só deixou de ser
+  // possível chegar lá pela interface) — inofensivo manter, e fácil de voltar
+  // a expor como opção se um dia for preciso.
+  const TIPO_NEGOCIO_OPTIONS = ['Angariação + Fidelização', 'Refidelização'];
   const DURACAO_OPTIONS = ['12', '18', '24', '36'];
   const CATEGORIA_COMISSAO_OPTIONS = ['Novo/Convergente', 'Carteira', 'Fora Carteira'];
   const NUM_PRODUTOS_OPTIONS = ['1P', '2P', '3P', '4P', '5P', 'GCP', 'Outros'];
@@ -603,23 +615,43 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   }
   // Calcula o Ponderador automaticamente a partir do Tipo de negócio,
   // Duração, Mensalidade Atual/Proposta (só para o subtipo de
-  // Refidelização), Categoria de cliente e Nº de produtos. Devolve null
-  // quando não há dados suficientes para calcular a tabela principal — quem
-  // chama (recomputePonderador) decide então não mexer no campo Ponderador,
-  // preservando valores já lá gravados/escritos à mão. Se faltar só o 2º
-  // multiplicador (categoria/produtos), devolve a base da tabela principal
-  // sozinha (equivalente a um multiplicador implícito de 1).
-  function ponderadorAutomatico(tipoNegocio, duracaoRaw, mensalidadeAtualRaw, mensalidadePropostaRaw, categoriaComissao, numProdutos){
+  // Refidelização), Categoria de cliente, Nº de produtos e Tipo de cliente
+  // (Novo/Existente). Devolve null quando não há dados suficientes para
+  // calcular a tabela principal — quem chama (recomputePonderador) decide
+  // então não mexer no campo Ponderador, preservando valores já lá
+  // gravados/escritos à mão. Se faltar só o 2º multiplicador
+  // (categoria/produtos), devolve a base da tabela principal sozinha
+  // (equivalente a um multiplicador implícito de 1).
+  function ponderadorAutomatico(tipoNegocio, duracaoRaw, mensalidadeAtualRaw, mensalidadePropostaRaw, categoriaComissao, numProdutos, tipoCliente){
     if(!tipoNegocio) return null;
     const base = baseTabelaPrincipal(tipoNegocio, duracaoRaw, mensalidadeAtualRaw, mensalidadePropostaRaw);
     if(base==null) return null;
 
-    if(!categoriaComissao || !numProdutos) return base;
-    const bucket = produtosBucket(numProdutos);
-    const tabelaCliente = PONDERADOR_CLIENTE_TABELA[categoriaComissao];
-    const mult = bucket && tabelaCliente ? tabelaCliente[bucket] : null;
-    if(mult==null) return base;
-    return Math.round(base * mult * 10000) / 10000;
+    let mult = null;
+    if(categoriaComissao && numProdutos){
+      const bucket = produtosBucket(numProdutos);
+      const tabelaCliente = PONDERADOR_CLIENTE_TABELA[categoriaComissao];
+      mult = bucket && tabelaCliente ? tabelaCliente[bucket] : null;
+    }
+    // Penalização de 50% — cliente "Existente" (Tipo de cliente) que está
+    // "Fora Carteira" (Categoria de cliente) — confirmado pelo utilizador
+    // (29/07/2026), com exemplo numérico: Proposta 100€ x Ponderador 5,28 =
+    // 528€ "normal"; no caso de ser fora de carteira a Comissão fica a
+    // metade, 264€. Aplicada aqui ao Ponderador (não à Comissão em si), para
+    // a fórmula Comissão = Proposta x Ponderador continuar válida em todo o
+    // resto do código sem nenhuma alteração. É uma penalização ADICIONAL —
+    // soma-se ao multiplicador que "Fora Carteira" já tem por si só na
+    // tabela de 2º multiplicador (0,5 em ambos os buckets, ver
+    // PONDERADOR_CLIENTE_TABELA), por isso um cliente Existente+Fora
+    // Carteira fica com um multiplicador combinado de 0,5 x 0,5 = 0,25 do
+    // valor base — a rever com o utilizador se não for esse o efeito
+    // pretendido (ex: se "Fora Carteira" só devesse valer 0,5 no total,
+    // e não 0,25, quando o cliente também é Existente).
+    const penalizacaoExistenteForaCarteira = (tipoCliente === 'Existente' && categoriaComissao === 'Fora Carteira') ? 0.5 : 1;
+
+    if(mult==null && penalizacaoExistenteForaCarteira===1) return base;
+    const fator = (mult==null ? 1 : mult) * penalizacaoExistenteForaCarteira;
+    return Math.round(base * fator * 10000) / 10000;
   }
   function fmtDate(d){
     if(!d) return '—';
@@ -661,6 +693,23 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const y=d2.getFullYear(), m=String(d2.getMonth()+1).padStart(2,'0'), dd=String(d2.getDate()).padStart(2,'0');
     return `${y}-${m}-${dd}`;
   }
+  // Soma meses a uma data ISO (usado por Conclusão + Duração -> novo Fim de
+  // fidelização, 29/07/2026). Faz "clamp" ao último dia do mês de destino em
+  // vez de transbordar para o mês seguinte quando o dia de origem não existe
+  // lá — ex: 31/01 + 1 mês dá 28/29 Fev, não 2/3 Março (comportamento nativo
+  // do construtor Date, sem este ajuste, seria o segundo).
+  function addMonthsToISO(iso, months){
+    const d = parseISO(iso);
+    if(!d || !Number.isFinite(months)) return '';
+    const totalMonths = d.getMonth() + months;
+    const targetYear = d.getFullYear() + Math.floor(totalMonths / 12);
+    const targetMonth = ((totalMonths % 12) + 12) % 12;
+    const lastDayTargetMonth = new Date(targetYear, targetMonth+1, 0).getDate();
+    const targetDay = Math.min(d.getDate(), lastDayTargetMonth);
+    const d2 = new Date(targetYear, targetMonth, targetDay);
+    const y=d2.getFullYear(), m=String(d2.getMonth()+1).padStart(2,'0'), dd=String(d2.getDate()).padStart(2,'0');
+    return `${y}-${m}-${dd}`;
+  }
   // Recalcula a Próx. refidelização a partir da Fim de fidelização e do
   // tarifário atualmente escrito na linha (M Movel, Shift ou BLM -> 90 dias, resto -> 180).
   // Não mexe em nada se houver uma situação especial selecionada, para não
@@ -674,6 +723,45 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const tarifInp = tr.querySelector('.'+prefix+'-tarifario');
     proxInp.value = isoMinusDays(fimInp.value, proxRefidDays(tarifInp? tarifInp.value : ''));
   }
+  // Conclusão + Duração -> novo Fim de fidelização (29/07/2026). Pedido do
+  // utilizador: depois de fechar uma refidelização, escrever a data em que
+  // ficou concluída e deixar a Duração (já preenchida para o cálculo da
+  // Comissão) somar-se sozinha, dando logo o novo Fim de fidelização — que,
+  // por sua vez, já dispara autoRecomputeProx() (mesmo mecanismo de sempre),
+  // recalculando a Próx. refidelização a partir das regras já existentes
+  // (180 dias, ou 90 para M Movel/Shift/BLM). Como as durações disponíveis
+  // (12 a 36 meses) são sempre bem mais longas que ALERT_WINDOW_DAYS (180
+  // dias), o cliente cai naturalmente no grupo "Futuro" (azul) sem precisar
+  // de nenhuma lógica extra — é só consequência normal da conta, a não ser
+  // que a Conclusão seja uma data já lá para trás.
+  // Só mexe no Fim de fidelização quando Conclusão E Duração estão as duas
+  // preenchidas — enquanto Conclusão continuar em branco (caso de todos os
+  // clientes já existentes, é um campo novo), esta função não faz nada,
+  // preservando o Fim de fidelização histórico/manual como sempre. Mesma
+  // guarda de "situação especial" do autoRecomputeProx, para não sobrepor
+  // uma Fim de fidelização que essa opção limpou de propósito.
+  function recomputeFimFidelizacao(tr, prefix){
+    const situacaoSel = tr.querySelector('.'+prefix+'-situacao');
+    if(situacaoSel && SITUACAO_ESPECIAL_OPTIONS.includes(situacaoSel.value)) return;
+    const fimInp = tr.querySelector('.'+prefix+'-fim');
+    const conclusaoInp = tr.querySelector('.'+prefix+'-conclusao');
+    const duracaoInp = tr.querySelector('.'+prefix+'-duracao');
+    if(!fimInp || !conclusaoInp || !duracaoInp) return;
+    if(!conclusaoInp.value) return;
+    const duracaoNum = parseNum(duracaoInp.value);
+    if(duracaoNum===null) return;
+    const novoFim = addMonthsToISO(conclusaoInp.value, duracaoNum);
+    if(!novoFim) return;
+    fimInp.value = novoFim;
+    autoRecomputeProx(tr, prefix);
+  }
+  // Duração alimenta 2 cálculos independentes: o Ponderador (plano
+  // comissional) e, quando há Conclusão preenchida, o novo Fim de
+  // fidelização. Handler combinado para não esquecer nenhum dos dois.
+  function onDuracaoChanged(tr, prefix){
+    recomputeFimFidelizacao(tr, prefix);
+    onComissaoInputsChanged(tr, prefix);
+  }
   // Atualiza a pré-visualização da Comissão (Proposta × Ponderador) em tempo
   // real, enquanto o utilizador escreve num dos dois campos — mesmo padrão do
   // autoRecomputeProx acima, mas não grava nada, é só um valor mostrado.
@@ -686,13 +774,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     out.textContent = val!==null ? fmtEuro(val) : '—';
   }
   // Recalcula o Ponderador a partir dos campos do plano comissional (Tipo de
-  // negócio, Duração, Categoria de cliente, Nº de produtos) e da comparação
-  // Atual/Proposta — mesmo padrão do autoRecomputeProx() para a Próx.
-  // refidelização: corre sempre que um destes campos muda, mas só escreve
-  // no campo Ponderador quando consegue mesmo calcular um valor; se faltar
-  // informação (ex: Tipo de negócio ainda por escolher), não mexe no que já
-  // lá estava — importante para não apagar Ponderadores antigos gravados à
-  // mão em clientes que ainda não têm estes campos novos preenchidos.
+  // negócio, Duração, Categoria de cliente, Nº de produtos, Tipo de
+  // cliente) e da comparação Atual/Proposta — mesmo padrão do
+  // autoRecomputeProx() para a Próx. refidelização: corre sempre que um
+  // destes campos muda, mas só escreve no campo Ponderador quando consegue
+  // mesmo calcular um valor; se faltar informação (ex: Tipo de negócio
+  // ainda por escolher), não mexe no que já lá estava — importante para não
+  // apagar Ponderadores antigos gravados à mão em clientes que ainda não
+  // têm estes campos novos preenchidos.
   // Ponderador continua um campo normal, editável à mão a qualquer momento;
   // uma edição manual só é substituída se um dos campos de origem voltar a
   // mudar depois (tal como já acontece com a Próx. refidelização).
@@ -702,7 +791,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const g = cls => { const el = tr.querySelector('.'+prefix+'-'+cls); return el ? el.value : ''; };
     const val = ponderadorAutomatico(
       g('tipo-negocio'), g('duracao'), g('mensalidade-atual'), g('mensalidade-proposta'),
-      g('categoria-comissao'), g('num-produtos')
+      g('categoria-comissao'), g('num-produtos'), g('tipo-cliente')
     );
     if(val!==null) pondInp.value = String(val);
   }
@@ -770,6 +859,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       comissao: get('comissao')||'', tipoCliente: get('tipo_cliente')||'',
       tipoNegocio: get('tipo_negocio')||'', duracaoMeses: get('duracao_meses')||'',
       categoriaComissao: get('categoria_comissao')||'', numProdutos: get('num_produtos')||'',
+      conclusao: get('data_conclusao')||'',
       fimDate, fimRaw, proxDate, proxRaw,
       status: s.status, statusLabel: s.statusLabel, expired: s.expired, colorGroup: colorGroupOf(s.status), days
     };
@@ -1275,6 +1365,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     }
     const fimVal = toDateInputValue(r.fimDate, r.fimRaw);
     const proxVal = toDateInputValue(r.proxDate, r.proxRaw);
+    const conclusaoVal = toDateInputValue(parseISO(r.conclusao), r.conclusao);
     const comissaoInitVal = comissaoDe(r.mensalidadeProposta, r.ponderador);
     const comissaoInitHtml = comissaoInitVal!==null ? fmtEuro(comissaoInitVal) : '—';
     const estadoOptionsHtml = ['<option value="">Sem estado</option>']
@@ -1307,9 +1398,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           <input type="text" inputmode="decimal" class="f-mensalidade-atual num-input" placeholder="Atual €" value="${esc(r.mensalidadeAtual)}">
           <input type="text" inputmode="decimal" class="f-mensalidade-proposta num-input" placeholder="Proposta €" value="${esc(r.mensalidadeProposta)}">
         </div>
-        <div class="negocio-edit-line" title="Tipo de negócio e Duração — usados para calcular o Ponderador automaticamente (plano comissional)">
+        <div class="negocio-edit-line" title="Tipo de negócio — usado para calcular o Ponderador automaticamente (plano comissional)">
           <select class="f-tipo-negocio">${tipoNegocioOptionsHtml}</select>
+        </div>
+        <div class="negocio-datas-line" title="Duração (meses) e Conclusão — a Conclusão + Duração define o novo Fim de Fidelização">
           <select class="f-duracao">${duracaoOptionsHtml}</select>
+          <input type="date" class="f-conclusao" placeholder="Conclusão" value="${esc(conclusaoVal)}">
         </div>
         <div class="comissao-preview">Comissão <span class="f-comissao-val">${comissaoInitHtml}</span></div>
       </td>
@@ -1374,9 +1468,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           <input type="text" inputmode="decimal" class="nf-mensalidade-atual num-input" placeholder="Atual €">
           <input type="text" inputmode="decimal" class="nf-mensalidade-proposta num-input" placeholder="Proposta €">
         </div>
-        <div class="negocio-edit-line" title="Tipo de negócio e Duração — usados para calcular o Ponderador automaticamente (plano comissional)">
+        <div class="negocio-edit-line" title="Tipo de negócio — usado para calcular o Ponderador automaticamente (plano comissional)">
           <select class="nf-tipo-negocio">${tipoNegocioOptionsHtml}</select>
+        </div>
+        <div class="negocio-datas-line" title="Duração (meses) e Conclusão — a Conclusão + Duração define o novo Fim de Fidelização">
           <select class="nf-duracao">${duracaoOptionsHtml}</select>
+          <input type="date" class="nf-conclusao" placeholder="Conclusão">
         </div>
         <div class="comissao-preview">Comissão <span class="nf-comissao-val">—</span></div>
       </td>
@@ -1446,9 +1543,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         newTr.querySelector('.nf-mensalidade-atual').addEventListener('input', ()=> onComissaoInputsChanged(newTr, 'nf'));
         newTr.querySelector('.nf-mensalidade-proposta').addEventListener('input', ()=> onComissaoInputsChanged(newTr, 'nf'));
         newTr.querySelector('.nf-tipo-negocio').addEventListener('change', ()=> onComissaoInputsChanged(newTr, 'nf'));
-        newTr.querySelector('.nf-duracao').addEventListener('change', ()=> onComissaoInputsChanged(newTr, 'nf'));
+        newTr.querySelector('.nf-duracao').addEventListener('change', ()=> onDuracaoChanged(newTr, 'nf'));
+        newTr.querySelector('.nf-conclusao').addEventListener('change', ()=> recomputeFimFidelizacao(newTr, 'nf'));
         newTr.querySelector('.nf-categoria-comissao').addEventListener('change', ()=> onComissaoInputsChanged(newTr, 'nf'));
         newTr.querySelector('.nf-num-produtos').addEventListener('change', ()=> onComissaoInputsChanged(newTr, 'nf'));
+        // Tipo de cliente (Novo/Existente) agora também alimenta o cálculo do
+        // Ponderador — penalização de 50% quando Existente + Fora Carteira
+        // (29/07/2026, ver ponderadorAutomatico()) — por isso também recalcula.
+        newTr.querySelector('.nf-tipo-cliente').addEventListener('change', ()=> onComissaoInputsChanged(newTr, 'nf'));
         newTr.querySelector('.nf-ponderador').addEventListener('input', ()=> updateComissaoPreview(newTr, 'nf'));
         newTr.querySelector('.nf-situacao').addEventListener('change', (e)=>{
           if(SITUACAO_ESPECIAL_OPTIONS.includes(e.target.value)){
@@ -1512,12 +1614,23 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         sel.addEventListener('change', ()=> onComissaoInputsChanged(sel.closest('tr'), 'f'));
       });
       tableWrap.querySelectorAll('.f-duracao').forEach(sel=>{
-        sel.addEventListener('change', ()=> onComissaoInputsChanged(sel.closest('tr'), 'f'));
+        sel.addEventListener('change', ()=> onDuracaoChanged(sel.closest('tr'), 'f'));
+      });
+      // Conclusão + Duração define o novo Fim de fidelização (que por sua vez
+      // recalcula a Próx. refidelização em cascata via recomputeFimFidelizacao).
+      tableWrap.querySelectorAll('.f-conclusao').forEach(inp=>{
+        inp.addEventListener('change', ()=> recomputeFimFidelizacao(inp.closest('tr'), 'f'));
       });
       tableWrap.querySelectorAll('.f-categoria-comissao').forEach(sel=>{
         sel.addEventListener('change', ()=> onComissaoInputsChanged(sel.closest('tr'), 'f'));
       });
       tableWrap.querySelectorAll('.f-num-produtos').forEach(sel=>{
+        sel.addEventListener('change', ()=> onComissaoInputsChanged(sel.closest('tr'), 'f'));
+      });
+      // Tipo de cliente (Novo/Existente) agora também alimenta o cálculo do
+      // Ponderador — penalização de 50% quando Existente + Fora Carteira
+      // (29/07/2026, ver ponderadorAutomatico()) — por isso também recalcula.
+      tableWrap.querySelectorAll('.f-tipo-cliente').forEach(sel=>{
         sel.addEventListener('change', ()=> onComissaoInputsChanged(sel.closest('tr'), 'f'));
       });
       tableWrap.querySelectorAll('.f-ponderador').forEach(inp=>{
@@ -1593,6 +1706,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const tipoCliente = val('.f-tipo-cliente');
     const tipoNegocio = val('.f-tipo-negocio');
     const duracaoMeses = val('.f-duracao');
+    const conclusao = val('.f-conclusao');
     const categoriaComissao = val('.f-categoria-comissao');
     const numProdutos = val('.f-num-produtos');
     const observacoes = tr.querySelector('.f-obs').value;
@@ -1618,7 +1732,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email,
       D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial,
       U: mensalidadeAtual, V: mensalidadeProposta, W: ponderador, X: comissaoStr, Y: tipoCliente,
-      Z: tipoNegocio, AA: duracaoMeses, AB: categoriaComissao, AC: numProdutos
+      Z: tipoNegocio, AA: duracaoMeses, AB: categoriaComissao, AC: numProdutos, AD: conclusao
     };
 
     fetch(API_URL, {
@@ -1635,7 +1749,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         rec.situacaoEspecial = situacaoEspecial;
         rec.mensalidadeAtual = mensalidadeAtual; rec.mensalidadeProposta = mensalidadeProposta; rec.ponderador = ponderador;
         rec.comissao = comissaoStr; rec.tipoCliente = tipoCliente;
-        rec.tipoNegocio = tipoNegocio; rec.duracaoMeses = duracaoMeses;
+        rec.tipoNegocio = tipoNegocio; rec.duracaoMeses = duracaoMeses; rec.conclusao = conclusao;
         rec.categoriaComissao = categoriaComissao; rec.numProdutos = numProdutos;
         rec.fimRaw = fim || null; rec.fimDate = parseISO(fim);
         rec.proxRaw = prox || null; rec.proxDate = parseISO(prox);
@@ -1723,6 +1837,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const tipoCliente = val('.nf-tipo-cliente');
     const tipoNegocio = val('.nf-tipo-negocio');
     const duracaoMeses = val('.nf-duracao');
+    const conclusao = val('.nf-conclusao');
     const categoriaComissao = val('.nf-categoria-comissao');
     const numProdutos = val('.nf-num-produtos');
     const observacoes = tr.querySelector('.nf-obs').value;
@@ -1752,7 +1867,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email,
       D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial,
       U: mensalidadeAtual, V: mensalidadeProposta, W: ponderador, X: comissaoStr, Y: tipoCliente,
-      Z: tipoNegocio, AA: duracaoMeses, AB: categoriaComissao, AC: numProdutos
+      Z: tipoNegocio, AA: duracaoMeses, AB: categoriaComissao, AC: numProdutos, AD: conclusao
     };
 
     fetch(API_URL, {
@@ -1772,7 +1887,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         localidade: '', contato, email, telemovel, observacoes,
         estadoContato, estadoData, situacaoEspecial,
         mensalidadeAtual, mensalidadeProposta, ponderador, comissao: comissaoStr, tipoCliente,
-        tipoNegocio, duracaoMeses, categoriaComissao, numProdutos,
+        tipoNegocio, duracaoMeses, conclusao, categoriaComissao, numProdutos,
         fimDate, fimRaw: fim || null, proxDate, proxRaw: prox || null,
         status: s.status, statusLabel: s.statusLabel, expired: s.expired, colorGroup: colorGroupOf(s.status), days
       };
