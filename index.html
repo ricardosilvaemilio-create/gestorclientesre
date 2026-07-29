@@ -454,7 +454,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // Ponderador. "Fora Carteira" existe na tabela do plano mas ainda não é
   // usada em nenhuma lógica automática de categoria — é só mais uma opção
   // do dropdown "Categoria de cliente" (comissão).
-  const TIPO_NEGOCIO_OPTIONS = ['Angariação', 'Fidelização', 'Refidelização'];
+  // "Angariação" nunca aparece sozinha — confirmado pelo utilizador (29/07/2026,
+  // com 2 exemplos numéricos) que Angariação e Fidelização se SOMAM sempre que
+  // se trata de um cliente novo (a Angariação não tem duração própria, por
+  // isso usa sempre a Fidelização da duração escolhida para completar a soma).
+  // Ver baseTabelaPrincipal() mais abaixo.
+  const TIPO_NEGOCIO_OPTIONS = ['Angariação + Fidelização', 'Fidelização', 'Refidelização'];
   const DURACAO_OPTIONS = ['12', '18', '24', '36'];
   const CATEGORIA_COMISSAO_OPTIONS = ['Novo/Convergente', 'Carteira', 'Fora Carteira'];
   const NUM_PRODUTOS_OPTIONS = ['1P', '2P', '3P', '4P', '5P', 'GCP', 'Outros'];
@@ -563,6 +568,39 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     if(proposta < atual) return 'Refidelização-Decréscimo';
     return 'Refidelização-Manutenção';
   }
+  // Devolve o valor (coluna PATAMAR_FIXO) de uma célula da tabela principal,
+  // ou null se a categoria/duração não existir na tabela.
+  function celulaTabelaPrincipal(categoria, duracaoChave){
+    const porDuracao = PONDERADOR_TABELA[categoria];
+    if(!porDuracao) return null;
+    const celula = duracaoChave!==null && duracaoChave!==undefined ? porDuracao[duracaoChave] : null;
+    return celula ? celula[PATAMAR_FIXO] : null;
+  }
+  // Combina Tipo de negócio + Duração (+ Atual/Proposta, só para saber o
+  // subtipo de Refidelização) num único valor "base" da tabela principal,
+  // ANTES do 2º multiplicador de cliente. Confirmado pelo utilizador
+  // (29/07/2026, com 2 exemplos numéricos: 2+1,2=3,2 aos 24 meses, 2+2=4 aos
+  // 36 meses) que "Angariação" NUNCA se aplica sozinha — soma-se sempre com
+  // a Fidelização da duração escolhida, porque um cliente novo (Angariação)
+  // está sempre também a assinar o primeiro contrato de fidelização.
+  function baseTabelaPrincipal(tipoNegocio, duracaoRaw, mensalidadeAtualRaw, mensalidadePropostaRaw){
+    const duracaoNum = parseNum(duracaoRaw);
+    if(tipoNegocio === 'Angariação + Fidelização'){
+      const angariacao = celulaTabelaPrincipal('Angariação', '-');
+      const fidelizacao = celulaTabelaPrincipal('Fidelização', duracaoNum);
+      if(angariacao==null || fidelizacao==null) return null;
+      return angariacao + fidelizacao;
+    }
+    if(tipoNegocio === 'Fidelização'){
+      return celulaTabelaPrincipal('Fidelização', duracaoNum);
+    }
+    if(tipoNegocio === 'Refidelização'){
+      const subtipo = refidelizacaoSubtipo(mensalidadeAtualRaw, mensalidadePropostaRaw);
+      if(!subtipo) return null; // falta Atual ou Proposta para saber o subtipo
+      return celulaTabelaPrincipal(subtipo, duracaoNum);
+    }
+    return null;
+  }
   // Calcula o Ponderador automaticamente a partir do Tipo de negócio,
   // Duração, Mensalidade Atual/Proposta (só para o subtipo de
   // Refidelização), Categoria de cliente e Nº de produtos. Devolve null
@@ -573,17 +611,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   // sozinha (equivalente a um multiplicador implícito de 1).
   function ponderadorAutomatico(tipoNegocio, duracaoRaw, mensalidadeAtualRaw, mensalidadePropostaRaw, categoriaComissao, numProdutos){
     if(!tipoNegocio) return null;
-    let categoria = tipoNegocio;
-    if(tipoNegocio === 'Refidelização'){
-      categoria = refidelizacaoSubtipo(mensalidadeAtualRaw, mensalidadePropostaRaw);
-      if(!categoria) return null; // falta Atual ou Proposta para saber o subtipo
-    }
-    const porDuracao = PONDERADOR_TABELA[categoria];
-    if(!porDuracao) return null;
-    const chave = categoria === 'Angariação' ? '-' : parseNum(duracaoRaw);
-    const celula = chave!==null ? porDuracao[chave] : null;
-    if(!celula) return null;
-    const base = celula[PATAMAR_FIXO];
+    const base = baseTabelaPrincipal(tipoNegocio, duracaoRaw, mensalidadeAtualRaw, mensalidadePropostaRaw);
     if(base==null) return null;
 
     if(!categoriaComissao || !numProdutos) return base;
