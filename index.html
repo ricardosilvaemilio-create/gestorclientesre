@@ -587,7 +587,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function paramsFromLocation(){
     const p = new URLSearchParams(location.search);
-    return { api: p.get('api')||'https://script.google.com/macros/s/AKfycbx3wr2mS6nugG22h5JobxYY6epklGyN84lVZCeKAQHBqEwpRfDT32uIAd2qAvYIm6xl/exec', token: p.get('token')||'vOJtAuuqkgE6_9Xo0hsOjjRm73-36jMi' };
+    return { api: p.get('api')||'', token: p.get('token')||'' };
   }
 
   // Só depois de a password de acesso estar correta é que avançamos para o
