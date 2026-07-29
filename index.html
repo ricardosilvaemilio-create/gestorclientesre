@@ -100,7 +100,8 @@ h1{font-size:20px; margin:0 0 4px;}
 .sync-dot.saving{background:var(--warning);}
 .sync-dot.error{background:var(--critical);}
 
-table{width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; border:1px solid var(--border);}
+#tableWrap{overflow-x:auto;}
+table{width:100%; border-collapse:collapse; background:var(--card); border-radius:12px; overflow:hidden; border:1px solid var(--border); min-width:1100px;}
 thead th{
   text-align:left; font-size:11px; text-transform:uppercase; letter-spacing:.02em; color:var(--text-muted);
   padding:10px 12px; border-bottom:1px solid var(--grid); cursor:pointer; white-space:nowrap; user-select:none;
@@ -119,6 +120,7 @@ td.obs{max-width:280px; color:var(--text-secondary); font-size:12.5px;}
 td.dates{white-space:nowrap; font-variant-numeric:tabular-nums; font-size:12.5px;}
 td.dates .days{display:block; font-size:11px; margin-top:2px;}
 td.estado{white-space:nowrap; font-size:12.5px;}
+td.num{white-space:nowrap; font-variant-numeric:tabular-nums; font-size:12.5px; text-align:right;}
 
 .obs-text{white-space:pre-wrap; min-height:18px; border-radius:6px; padding:3px 5px; margin:-3px -5px;}
 .estado-pill{
@@ -132,6 +134,7 @@ td input[type=text], td input[type=date], td select{
   width:100%; padding:5px 7px; border:1px solid var(--baseline); border-radius:6px;
   font-family:inherit; font-size:12.5px; background:var(--surface-1); color:var(--text-primary);
 }
+td input.num-input{ text-align:right; }
 td input[readonly]{
   background:var(--surface-2, #eee); color:var(--text-muted); cursor:not-allowed;
 }
@@ -404,10 +407,13 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   let page = 1;
   const pageSize = 50;
 
-  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data','situacao_especial'];
-  // row array from Apps Script: [rowNum, A..T] -> index i+1 = COLS[i]
+  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data','situacao_especial','mensalidade_atual','mensalidade_proposta','ponderador'];
+  // row array from Apps Script: [rowNum, A..W] -> index i+1 = COLS[i]
   // estado_contato = coluna R, estado_data = coluna S, situacao_especial =
-  // coluna T (têm de existir na folha — ver Code.gs).
+  // coluna T, mensalidade_atual = coluna U, mensalidade_proposta = coluna V,
+  // ponderador = coluna W (têm de existir na folha — ver Code.gs). As 3
+  // últimas são a base do gerador de comissões (29/07/2026) — por agora só
+  // campos para preencher à mão, sem cálculo automático nenhum ainda.
 
   // Hipóteses do "Estado do contacto" — para adicionar mais opções, acrescenta aqui.
   const ESTADO_OPTIONS = ['Em negociação', 'Proposta enviada', 'Concluído'];
@@ -423,6 +429,26 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
     if(!m) return null;
     return new Date(+m[1], +m[2]-1, +m[3]);
+  }
+  // Mensalidade atual/proposta (€) e Ponderador — campos do gerador de
+  // comissões, gravados como texto simples do lado do painel (o valor
+  // numérico real só é imposto ao gravar, ver toSheetValue_ no Code.gs) mas
+  // mostrados já formatados na tabela. parseNum aceita tanto "12.34" como
+  // "12,34" (vírgula à portuguesa) para não rejeitar o que vier da folha.
+  function parseNum(raw){
+    if(raw===''||raw==null) return null;
+    const n = Number(String(raw).trim().replace(',', '.'));
+    return isNaN(n) ? null : n;
+  }
+  function fmtEuro(raw){
+    const n = parseNum(raw);
+    if(n===null) return raw ? esc(String(raw)) : '—';
+    return n.toLocaleString('pt-PT', {minimumFractionDigits:2, maximumFractionDigits:2}) + ' €';
+  }
+  function fmtNumber(raw){
+    const n = parseNum(raw);
+    if(n===null) return raw ? esc(String(raw)) : '—';
+    return n.toLocaleString('pt-PT', {maximumFractionDigits:2});
   }
   function fmtDate(d){
     if(!d) return '—';
@@ -530,6 +556,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       morada: get('morada')||'', cp: get('cp')||'',
       estadoContato: get('estado_contato')||'', estadoData: get('estado_data')||'',
       situacaoEspecial,
+      mensalidadeAtual: get('mensalidade_atual')||'', mensalidadeProposta: get('mensalidade_proposta')||'', ponderador: get('ponderador')||'',
       fimDate, fimRaw, proxDate, proxRaw,
       status: s.status, statusLabel: s.statusLabel, expired: s.expired, colorGroup: colorGroupOf(s.status), days
     };
@@ -560,7 +587,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
   function paramsFromLocation(){
     const p = new URLSearchParams(location.search);
-    return { api: p.get('api')||'', token: p.get('token')||'' };
+    return { api: p.get('api')||'https://script.google.com/macros/s/AKfycbx3wr2mS6nugG22h5JobxYY6epklGyN84lVZCeKAQHBqEwpRfDT32uIAd2qAvYIm6xl/exec', token: p.get('token')||'vOJtAuuqkgE6_9Xo0hsOjjRm73-36jMi' };
   }
 
   // Só depois de a password de acesso estar correta é que avançamos para o
@@ -918,6 +945,11 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     render();
   }
 
+  // Mensalidade atual/proposta e Ponderador são números — comparação por
+  // texto (localeCompare) ordenaria "10" antes de "9", por isso estas 3
+  // colunas usam comparação numérica dedicada em vez da genérica abaixo.
+  const NUMERIC_SORT_KEYS = { mensalidadeAtual:true, mensalidadeProposta:true, ponderador:true };
+
   function sortRecords(){
     // Os "vencidos" (data já passada) mantêm prioridade visual mesmo estando
     // agrupados no mesmo tile/contagem que os "sem data associada".
@@ -931,6 +963,11 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         return (av-bv)*sortDir;
       }
       av = (a[sortKey]||''); bv = (b[sortKey]||'');
+      if(NUMERIC_SORT_KEYS[sortKey]){
+        const an = parseNum(av), bn = parseNum(bv);
+        const aVal = an===null? -Infinity : an, bVal = bn===null? -Infinity : bn;
+        return (aVal-bVal)*sortDir;
+      }
       if(av instanceof Date || bv instanceof Date){
         av = av? av.getTime():-Infinity; bv = bv? bv.getTime():-Infinity;
         return (av-bv)*sortDir;
@@ -948,6 +985,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     {key:'fimDate', label:'Fim fidelização / estado'},
     {key:'proxDate', label:'Próx. refidelização'},
     {key:'estadoContato', label:'Estado do contacto'},
+    {key:'mensalidadeAtual', label:'Mensalidade atual'},
+    {key:'mensalidadeProposta', label:'Mensalidade Proposta'},
+    {key:'ponderador', label:'Ponderador'},
     {key:'obs', label:'Observações', nosort:true},
     {key:'actions', label:'', nosort:true},
   ];
@@ -996,6 +1036,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <td class="estado">${r.estadoContato
           ? `<span class="estado-pill">${esc(r.estadoContato)}</span><span class="estado-date">${r.estadoData? fmtDate(parseISO(r.estadoData)) : ''}</span>`
           : (situacaoPillHtml ? '' : '—')}${situacaoPillHtml}</td>
+        <td class="num">${fmtEuro(r.mensalidadeAtual)}</td>
+        <td class="num">${fmtEuro(r.mensalidadeProposta)}</td>
+        <td class="num">${fmtNumber(r.ponderador)}</td>
         <td class="obs"><div class="obs-text">${esc(r.observacoes||'—')}</div></td>
         <td class="actions">${actionsHtml}</td>
       </tr>`;
@@ -1024,6 +1067,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <select class="f-estado">${estadoOptionsHtml}</select>
         <select class="f-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
       </td>
+      <td><input type="text" inputmode="decimal" class="f-mensalidade-atual num-input" placeholder="€" value="${esc(r.mensalidadeAtual)}"></td>
+      <td><input type="text" inputmode="decimal" class="f-mensalidade-proposta num-input" placeholder="€" value="${esc(r.mensalidadeProposta)}"></td>
+      <td><input type="text" inputmode="decimal" class="f-ponderador num-input" value="${esc(r.ponderador)}"></td>
       <td><textarea class="f-obs">${esc(r.observacoes==='—'?'':r.observacoes)}</textarea></td>
       <td class="actions">
         <button class="save-row-btn" type="button">Guardar</button>
@@ -1055,6 +1101,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <select class="nf-estado">${estadoOptionsHtml}</select>
         <select class="nf-situacao" title="Situação especial — &quot;Sem fidelização&quot; e &quot;Cliente Sem serviços&quot; limpam automaticamente a data de Fim de fidelização e a Próx. refidelização; &quot;Lista Amarela&quot; destaca a linha a amarelo e limpa a Próx. refidelização.">${situacaoOptionsHtml}</select>
       </td>
+      <td><input type="text" inputmode="decimal" class="nf-mensalidade-atual num-input" placeholder="€"></td>
+      <td><input type="text" inputmode="decimal" class="nf-mensalidade-proposta num-input" placeholder="€"></td>
+      <td><input type="text" inputmode="decimal" class="nf-ponderador num-input"></td>
       <td><textarea class="nf-obs" placeholder="Observações"></textarea></td>
       <td class="actions">
         <button class="create-save-btn" type="button">Guardar</button>
@@ -1202,6 +1251,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const prox = val('.f-prox');
     const estadoContato = val('.f-estado');
     const situacaoEspecial = val('.f-situacao');
+    const mensalidadeAtual = val('.f-mensalidade-atual').trim();
+    const mensalidadeProposta = val('.f-mensalidade-proposta').trim();
+    const ponderador = val('.f-ponderador').trim();
     const observacoes = tr.querySelector('.f-obs').value;
 
     btn.disabled = true;
@@ -1218,7 +1270,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
     const updates = {
       G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
-      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial
+      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial,
+      U: mensalidadeAtual, V: mensalidadeProposta, W: ponderador
     };
 
     fetch(API_URL, {
@@ -1233,6 +1286,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         rec.observacoes = observacoes;
         rec.estadoContato = estadoContato; rec.estadoData = estadoData;
         rec.situacaoEspecial = situacaoEspecial;
+        rec.mensalidadeAtual = mensalidadeAtual; rec.mensalidadeProposta = mensalidadeProposta; rec.ponderador = ponderador;
         rec.fimRaw = fim || null; rec.fimDate = parseISO(fim);
         rec.proxRaw = prox || null; rec.proxDate = parseISO(prox);
         const days = rec.fimDate ? Math.round((rec.fimDate - today)/86400000) : Infinity;
@@ -1314,6 +1368,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const prox = val('.nf-prox');
     const estadoContato = val('.nf-estado');
     const situacaoEspecial = val('.nf-situacao');
+    const mensalidadeAtual = val('.nf-mensalidade-atual').trim();
+    const mensalidadeProposta = val('.nf-mensalidade-proposta').trim();
+    const ponderador = val('.nf-ponderador').trim();
     const observacoes = tr.querySelector('.nf-obs').value;
 
     if(!cliente){
@@ -1337,7 +1394,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const estadoData = estadoContato ? todayISO() : '';
     const values = {
       G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email, L: localidade,
-      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial
+      D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial,
+      U: mensalidadeAtual, V: mensalidadeProposta, W: ponderador
     };
 
     fetch(API_URL, {
@@ -1356,6 +1414,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         tarifario, tarifNorm: tarifario.toUpperCase(),
         localidade, contato, email, telemovel, observacoes,
         estadoContato, estadoData, situacaoEspecial,
+        mensalidadeAtual, mensalidadeProposta, ponderador,
         fimDate, fimRaw: fim || null, proxDate, proxRaw: prox || null,
         status: s.status, statusLabel: s.statusLabel, expired: s.expired, colorGroup: colorGroupOf(s.status), days
       };
