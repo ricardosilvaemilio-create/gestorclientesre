@@ -248,6 +248,38 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
 .proposal-status.error{color:var(--critical);}
 .proposal-status.ok{color:var(--good);}
 
+/* Área Reservada — relatórios mensais de comissões (29/07/2026) */
+.ar-gate-error{color:var(--critical); font-size:12.5px; margin-top:10px; display:none;}
+.ar-gate-error.show{display:block;}
+.ar-summary{display:flex; gap:12px; flex-wrap:wrap; margin-bottom:18px;}
+.ar-summary-item{
+  flex:1 1 160px; background:var(--surface-1); border:1px solid var(--border); border-radius:10px;
+  padding:12px 14px;
+}
+.ar-summary-label{display:block; font-size:11px; color:var(--text-muted); font-weight:600; text-transform:uppercase; letter-spacing:.02em; margin-bottom:4px;}
+.ar-summary-value{font-size:20px; font-weight:700; color:var(--text-primary);}
+.ar-summary-item.pendente .ar-summary-value{color:var(--serious);}
+.ar-summary-item.pago .ar-summary-value{color:var(--good);}
+.ar-month{margin-bottom:22px; border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+.ar-month-header{
+  display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:6px;
+  padding:10px 14px; background:var(--surface-1); border-bottom:1px solid var(--border);
+}
+.ar-month-header h3{margin:0; font-size:14px;}
+.ar-month-totals{font-size:12px; color:var(--text-secondary);}
+table.ar-month-table{width:100%; border-collapse:collapse; font-size:12.5px;}
+table.ar-month-table th{
+  text-align:left; padding:6px 10px; font-size:10.5px; text-transform:uppercase; letter-spacing:.02em;
+  color:var(--text-muted); border-bottom:1px solid var(--grid);
+}
+table.ar-month-table td{padding:7px 10px; border-bottom:1px solid var(--grid); color:var(--text-primary);}
+table.ar-month-table tr:last-child td{border-bottom:none;}
+.ar-comissao-val{font-weight:700; color:var(--good);}
+.ar-pago-toggle{display:flex; align-items:center; gap:6px; cursor:pointer; font-size:12px; color:var(--text-secondary); white-space:nowrap;}
+.ar-pago-toggle input{cursor:pointer;}
+.ar-pago-toggle.is-pago{color:var(--good); font-weight:600;}
+.ar-empty{padding:30px; text-align:center; color:var(--text-muted); font-size:13px;}
+
 #proposalGridWrap{overflow-x:auto; max-width:100%;}
 .proposal-grid-hint{font-size:11.5px; color:var(--text-secondary); margin:0 0 6px 0;}
 table.proposal-grid{border-collapse:collapse; table-layout:fixed;}
@@ -325,6 +357,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       <div style="display:flex; gap:8px;">
         <button class="btn primary" id="newRecordBtn">+ Novo cliente</button>
         <button class="btn" id="refreshBtn">↻ Atualizar</button>
+        <button class="btn" id="areaReservadaBtn">🔒 Área Reservada</button>
         <button class="theme-toggle" id="themeToggle">🌓 Tema</button>
       </div>
     </header>
@@ -407,6 +440,48 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
           <span id="proposalStatus" class="proposal-status"></span>
           <button class="btn" id="proposalCloseBtn2" type="button">Fechar</button>
           <button class="btn primary" id="proposalSendBtn" type="button" disabled>Enviar por e-mail ao cliente</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="areaReservadaOverlay" class="modal-overlay hidden">
+      <div class="modal-panel">
+        <div class="modal-header">
+          <h2>🔒 Área Reservada — Comissões</h2>
+          <button class="modal-close" id="areaReservadaCloseBtn" type="button">✕</button>
+        </div>
+        <div class="modal-body">
+          <div id="areaReservadaGate">
+            <p style="color:var(--text-secondary); font-size:13px; line-height:1.5; margin:0 0 16px;">Esta área tem um código de acesso próprio, à parte da password do painel — só quem o souber consegue ver os valores de comissões.</p>
+            <div class="field" style="max-width:260px; margin-bottom:12px;">
+              <label for="areaReservadaPin">Código de acesso</label>
+              <input id="areaReservadaPin" type="password" placeholder="código" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+            </div>
+            <button class="btn primary" id="areaReservadaUnlockBtn" type="button" style="max-width:200px;">Entrar</button>
+            <div class="ar-gate-error" id="areaReservadaError">Código incorreto.</div>
+          </div>
+          <div id="areaReservadaReport" class="hidden">
+            <div class="ar-summary">
+              <div class="ar-summary-item pendente">
+                <span class="ar-summary-label">Total por receber</span>
+                <span class="ar-summary-value" id="arTotalPorPagar">—</span>
+              </div>
+              <div class="ar-summary-item pago">
+                <span class="ar-summary-label">Já recebido</span>
+                <span class="ar-summary-value" id="arTotalPago">—</span>
+              </div>
+              <div class="ar-summary-item">
+                <span class="ar-summary-label">Total geral</span>
+                <span class="ar-summary-value" id="arTotalGeral">—</span>
+              </div>
+            </div>
+            <div id="arMonths"></div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <span id="areaReservadaStatus" class="proposal-status"></span>
+          <button class="btn" id="areaReservadaExportBtn" type="button">Exportar Excel</button>
+          <button class="btn" id="areaReservadaCloseBtn2" type="button">Fechar</button>
         </div>
       </div>
     </div>
@@ -963,6 +1038,225 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   });
   accessPassword.focus();
 
+  // ---------- Área Reservada — relatórios mensais de comissões (29/07/2026) ----------
+  // Código de acesso PRÓPRIO, à parte da password geral do painel — mesmo
+  // mecanismo da password de acesso acima: só o hash SHA-256 fica no
+  // código, nunca o código em texto simples. Trava acesso casual de quem
+  // já tenha a password geral mas não deva ver valores de comissões; tal
+  // como a password geral, isto não substitui o token da Google Sheet, que
+  // continua a ser a única proteção real dos dados (quem tiver o URL+token
+  // consegue sempre ler/escrever diretamente pela API, gate ou não).
+  //
+  // O relatório lê de um separador à parte na folha ("HistoricoComissoes",
+  // ver Code.gs) que o próprio Apps Script vai alimentando sozinho a cada
+  // gravação — o separador "Geral" continua exatamente como sempre esteve
+  // (pedido do utilizador: "usar só o estado atual da folha"), mas como o
+  // histórico faz upsert por NIF+Data Conclusão em vez de espelhar a linha
+  // do cliente, um mês antigo nunca desaparece do relatório mesmo que esse
+  // cliente volte a ser refidelizado mais tarde (pedido do utilizador: "não
+  // pretendo apagar o registo do cliente nos relatórios de comissões").
+  const AREA_RESERVADA_HASH = 'a24fe861f7f279a59a98f02e73963d6a7ca7581631719afefd9411b546bb76f1';
+  let areaReservadaUnlocked = false;
+  let areaReservadaData = null; // cache do histórico já carregado, nesta sessão
+
+  const areaReservadaOverlay = document.getElementById('areaReservadaOverlay');
+  const areaReservadaGate = document.getElementById('areaReservadaGate');
+  const areaReservadaReportEl = document.getElementById('areaReservadaReport');
+  const areaReservadaPin = document.getElementById('areaReservadaPin');
+  const areaReservadaError = document.getElementById('areaReservadaError');
+  const areaReservadaUnlockBtn = document.getElementById('areaReservadaUnlockBtn');
+  const areaReservadaStatus = document.getElementById('areaReservadaStatus');
+
+  const MESES_PT = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+
+  function openAreaReservada(){
+    areaReservadaOverlay.classList.remove('hidden');
+    if(areaReservadaUnlocked){
+      areaReservadaGate.classList.add('hidden');
+      areaReservadaReportEl.classList.remove('hidden');
+      loadAreaReservadaReport(false);
+    } else {
+      areaReservadaGate.classList.remove('hidden');
+      areaReservadaReportEl.classList.add('hidden');
+      areaReservadaPin.value = '';
+      areaReservadaError.classList.remove('show');
+      setTimeout(()=> areaReservadaPin.focus(), 50);
+    }
+  }
+  function closeAreaReservada(){
+    areaReservadaOverlay.classList.add('hidden');
+  }
+
+  async function tryAreaReservadaUnlock(){
+    const value = areaReservadaPin.value;
+    areaReservadaError.classList.remove('show');
+    if(!value){
+      areaReservadaError.textContent = 'Introduz o código.';
+      areaReservadaError.classList.add('show');
+      return;
+    }
+    areaReservadaUnlockBtn.disabled = true;
+    const hash = await sha256Hex(value);
+    areaReservadaUnlockBtn.disabled = false;
+    if(hash === AREA_RESERVADA_HASH){
+      areaReservadaUnlocked = true;
+      areaReservadaGate.classList.add('hidden');
+      areaReservadaReportEl.classList.remove('hidden');
+      loadAreaReservadaReport(false);
+    } else {
+      areaReservadaError.textContent = 'Código incorreto.';
+      areaReservadaError.classList.add('show');
+      areaReservadaPin.value = '';
+      areaReservadaPin.focus();
+    }
+  }
+
+  document.getElementById('areaReservadaBtn').addEventListener('click', openAreaReservada);
+  areaReservadaUnlockBtn.addEventListener('click', tryAreaReservadaUnlock);
+  areaReservadaPin.addEventListener('keydown', (e)=>{ if(e.key==='Enter') tryAreaReservadaUnlock(); });
+  document.getElementById('areaReservadaCloseBtn').addEventListener('click', closeAreaReservada);
+  document.getElementById('areaReservadaCloseBtn2').addEventListener('click', closeAreaReservada);
+  areaReservadaOverlay.addEventListener('click', (e)=>{ if(e.target.id==='areaReservadaOverlay') closeAreaReservada(); });
+  document.getElementById('areaReservadaExportBtn').addEventListener('click', exportAreaReservadaXlsx);
+
+  function parseHistoricoRows(json){
+    // json.rows: [ [histRow, chave, data_conclusao, cliente, nif, tarifario, tipo_negocio, duracao, categoria_comissao, num_produtos, mensalidade_proposta, ponderador, comissao, pago, data_pagamento, atualizado_em], ... ]
+    return (json.rows||[]).map(r=>({
+      histRow: r[0], chave: r[1], dataConclusao: r[2], cliente: r[3], nif: r[4],
+      tarifario: r[5], tipoNegocio: r[6], duracao: r[7], categoriaComissao: r[8],
+      numProdutos: r[9], mensalidadeProposta: r[10], ponderador: r[11], comissao: r[12],
+      pago: r[13]==='Sim', dataPagamento: r[14], atualizadoEm: r[15]
+    })).filter(r=>r.dataConclusao && parseNum(r.comissao)!==null);
+  }
+
+  async function loadAreaReservadaReport(forceReload){
+    if(areaReservadaData && !forceReload){
+      renderAreaReservadaReport(areaReservadaData);
+      return;
+    }
+    areaReservadaStatus.textContent = 'A carregar…';
+    areaReservadaStatus.className = 'proposal-status';
+    try{
+      const url = API_URL + '?token=' + encodeURIComponent(TOKEN) + '&action=historico';
+      const resp = await fetch(url, {method:'GET'});
+      const json = await resp.json();
+      if(json.ok===false) throw new Error(json.error||'erro desconhecido');
+      areaReservadaData = parseHistoricoRows(json);
+      areaReservadaStatus.textContent = '';
+      renderAreaReservadaReport(areaReservadaData);
+    } catch(err){
+      areaReservadaStatus.textContent = 'Erro ao carregar: ' + err.message;
+      areaReservadaStatus.className = 'proposal-status error';
+    }
+  }
+
+  function renderAreaReservadaReport(entries){
+    const groups = {}; // 'AAAA-MM' -> [entradas]
+    entries.forEach(e=>{
+      const key = String(e.dataConclusao).slice(0,7); // 'AAAA-MM'
+      (groups[key] = groups[key] || []).push(e);
+    });
+    const monthKeys = Object.keys(groups).sort().reverse();
+
+    let totalGeral = 0, totalPago = 0;
+    entries.forEach(e=>{
+      const v = parseNum(e.comissao) || 0;
+      totalGeral += v;
+      if(e.pago) totalPago += v;
+    });
+    const totalPorPagar = totalGeral - totalPago;
+    document.getElementById('arTotalGeral').textContent = fmtEuro(totalGeral);
+    document.getElementById('arTotalPago').textContent = fmtEuro(totalPago);
+    document.getElementById('arTotalPorPagar').textContent = fmtEuro(totalPorPagar);
+
+    const wrap = document.getElementById('arMonths');
+    if(monthKeys.length===0){
+      wrap.innerHTML = '<div class="ar-empty">Ainda não há negócios com Data Conclusão + Comissão preenchidas.</div>';
+      return;
+    }
+
+    wrap.innerHTML = monthKeys.map(mk=>{
+      const parts = mk.split('-'); const y = parts[0]; const m = parts[1];
+      const label = MESES_PT[(+m)-1] + ' de ' + y;
+      const rows = groups[mk].slice().sort((a,b)=> (a.cliente||'').localeCompare(b.cliente||'', 'pt'));
+      let mesTotal = 0, mesPago = 0;
+      rows.forEach(r=>{ const v = parseNum(r.comissao)||0; mesTotal += v; if(r.pago) mesPago += v; });
+      const mesPorPagar = mesTotal - mesPago;
+      const linhasHtml = rows.map(r=>`
+        <tr>
+          <td>${esc(r.cliente||'—')}</td>
+          <td>${esc(r.nif||'—')}</td>
+          <td>${esc(r.tarifario||'—')}</td>
+          <td class="ar-comissao-val">${fmtEuro(r.comissao)}</td>
+          <td>
+            <label class="ar-pago-toggle${r.pago?' is-pago':''}">
+              <input type="checkbox" class="ar-pago-checkbox" data-hist-row="${r.histRow}" ${r.pago?'checked':''}>
+              ${r.pago?'Pago':'Por pagar'}
+            </label>
+          </td>
+        </tr>`).join('');
+      return `<div class="ar-month">
+        <div class="ar-month-header">
+          <h3>${esc(label)}</h3>
+          <span class="ar-month-totals">${rows.length} negócio(s) · Por pagar ${fmtEuro(mesPorPagar)} · Pago ${fmtEuro(mesPago)}</span>
+        </div>
+        <table class="ar-month-table">
+          <thead><tr><th>Cliente</th><th>NIF</th><th>Tarifário</th><th>Comissão</th><th>Pago</th></tr></thead>
+          <tbody>${linhasHtml}</tbody>
+        </table>
+      </div>`;
+    }).join('');
+
+    wrap.querySelectorAll('.ar-pago-checkbox').forEach(cb=>{
+      cb.addEventListener('change', ()=> toggleAreaReservadaPago(cb));
+    });
+  }
+
+  function toggleAreaReservadaPago(checkbox){
+    const histRow = Number(checkbox.dataset.histRow);
+    const pago = checkbox.checked;
+    checkbox.disabled = true;
+    const dataPagamento = pago ? todayISO() : '';
+    fetch(API_URL, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
+      body: JSON.stringify({ token: TOKEN, action:'marcarPago', historicoRow: histRow, pago, dataPagamento })
+    }).then(r=>r.json()).then(res=>{
+      if(!res.ok){ throw new Error(res.error||'erro'); }
+      const entry = areaReservadaData.find(e=>e.histRow===histRow);
+      if(entry){ entry.pago = pago; entry.dataPagamento = dataPagamento; }
+      renderAreaReservadaReport(areaReservadaData);
+    }).catch(err=>{
+      checkbox.checked = !pago; // reverte visualmente
+      checkbox.disabled = false;
+      areaReservadaStatus.textContent = 'Falha ao gravar: ' + err.message;
+      areaReservadaStatus.className = 'proposal-status error';
+    });
+  }
+
+  function exportAreaReservadaXlsx(){
+    if(!areaReservadaData || !areaReservadaData.length) return;
+    const headers = ['Mês','Cliente','NIF','Tarifário','Tipo de negócio','Duração','Comissão','Pago','Data pagamento'];
+    const aoa = [headers];
+    areaReservadaData.slice().sort((a,b)=> String(a.dataConclusao).localeCompare(String(b.dataConclusao))).forEach(e=>{
+      const mk = String(e.dataConclusao).slice(0,7);
+      const parts = mk.split('-'); const y = parts[0]; const m = parts[1];
+      const label = (MESES_PT[(+m)-1]||'') + ' de ' + y;
+      aoa.push([label, e.cliente, e.nif, e.tarifario, e.tipoNegocio, e.duracao, parseNum(e.comissao)||0, e.pago?'Sim':'Não', e.dataPagamento||'']);
+    });
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = headers.map((h,i)=>{
+      let max = h.length;
+      aoa.forEach(row=>{ const v = row[i]; if(v!=null){ max = Math.max(max, String(v).length); } });
+      return { wch: Math.min(Math.max(max+2, 10), 30) };
+    });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Comissões');
+    const stamp = new Date();
+    const y = stamp.getFullYear(), m = String(stamp.getMonth()+1).padStart(2,'0'), d = String(stamp.getDate()).padStart(2,'0');
+    XLSX.writeFile(wb, `comissoes_mensais_${y}${m}${d}.xlsx`);
+  }
+
   document.getElementById('connectBtn').addEventListener('click', ()=>{
     connect(document.getElementById('apiUrl').value.trim(), document.getElementById('apiToken').value.trim());
   });
@@ -1385,7 +1679,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const duracaoOptionsHtml = ['<option value="">— Duração —</option>']
       .concat(DURACAO_OPTIONS.map(opt=>`<option value="${esc(opt)}"${String(r.duracaoMeses||'')===opt?' selected':''}>${esc(opt)} meses</option>`))
       .join('');
-    const categoriaComissaoOptionsHtml = ['<option value="">— Categoria cliente —</option>']
+    const categoriaComissaoOptionsHtml = ['<option value="">— Categoria —</option>']
       .concat(CATEGORIA_COMISSAO_OPTIONS.map(opt=>`<option value="${esc(opt)}"${r.categoriaComissao===opt?' selected':''}>${esc(opt)}</option>`))
       .join('');
     const numProdutosOptionsHtml = ['<option value="">— Nº produtos —</option>']
@@ -1396,8 +1690,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <select class="f-tipo-cliente tipo-cliente-select">${tipoClienteOptionsHtml}</select>
         <input type="text" class="f-cliente" value="${esc(r.cliente)}">
         <div class="mensalidade-edit-line">
-          <input type="text" inputmode="decimal" class="f-mensalidade-atual num-input" placeholder="Atual €" value="${esc(r.mensalidadeAtual)}">
-          <input type="text" inputmode="decimal" class="f-mensalidade-proposta num-input" placeholder="Proposta €" value="${esc(r.mensalidadeProposta)}">
+          <input type="text" inputmode="decimal" class="f-mensalidade-atual num-input" placeholder="Mensalidade Atual" value="${esc(r.mensalidadeAtual)}">
+          <input type="text" inputmode="decimal" class="f-mensalidade-proposta num-input" placeholder="Nova Mensalidade" value="${esc(r.mensalidadeProposta)}">
         </div>
         <div class="negocio-edit-line" title="Tipo de negócio e Duração — usados para calcular o Ponderador automaticamente (plano comissional)">
           <select class="f-tipo-negocio">${tipoNegocioOptionsHtml}</select>
@@ -1458,7 +1752,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
     const duracaoOptionsHtml = ['<option value="">— Duração —</option>']
       .concat(DURACAO_OPTIONS.map(opt=>`<option value="${esc(opt)}">${esc(opt)} meses</option>`))
       .join('');
-    const categoriaComissaoOptionsHtml = ['<option value="">— Categoria cliente —</option>']
+    const categoriaComissaoOptionsHtml = ['<option value="">— Categoria —</option>']
       .concat(CATEGORIA_COMISSAO_OPTIONS.map(opt=>`<option value="${esc(opt)}">${esc(opt)}</option>`))
       .join('');
     const numProdutosOptionsHtml = ['<option value="">— Nº produtos —</option>']
@@ -1469,8 +1763,8 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
         <select class="nf-tipo-cliente tipo-cliente-select">${tipoClienteOptionsHtml}</select>
         <input type="text" class="nf-cliente" placeholder="Nome do cliente">
         <div class="mensalidade-edit-line">
-          <input type="text" inputmode="decimal" class="nf-mensalidade-atual num-input" placeholder="Atual €">
-          <input type="text" inputmode="decimal" class="nf-mensalidade-proposta num-input" placeholder="Proposta €">
+          <input type="text" inputmode="decimal" class="nf-mensalidade-atual num-input" placeholder="Mensalidade Atual">
+          <input type="text" inputmode="decimal" class="nf-mensalidade-proposta num-input" placeholder="Nova Mensalidade">
         </div>
         <div class="negocio-edit-line" title="Tipo de negócio e Duração — usados para calcular o Ponderador automaticamente (plano comissional)">
           <select class="nf-tipo-negocio">${tipoNegocioOptionsHtml}</select>
