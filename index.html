@@ -260,6 +260,7 @@ footer{margin-top:24px; color:var(--text-muted); font-size:11.5px; text-align:ce
 .ar-summary-value{font-size:20px; font-weight:700; color:var(--text-primary);}
 .ar-summary-item.pendente .ar-summary-value{color:var(--serious);}
 .ar-summary-item.pago .ar-summary-value{color:var(--good);}
+.ar-month-filter-field{max-width:220px; margin-bottom:16px;}
 .ar-month{margin-bottom:22px; border:1px solid var(--border); border-radius:10px; overflow:hidden;}
 .ar-month-header{
   display:flex; justify-content:space-between; align-items:baseline; flex-wrap:wrap; gap:6px;
@@ -486,6 +487,12 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
                 <span class="ar-summary-label">Total geral</span>
                 <span class="ar-summary-value" id="arTotalGeral">—</span>
               </div>
+            </div>
+            <div class="field ar-month-filter-field">
+              <label for="arMonthFilter">Filtrar por mês</label>
+              <select id="arMonthFilter">
+                <option value="">Todos os meses</option>
+              </select>
             </div>
             <div id="arMonths"></div>
           </div>
@@ -1076,6 +1083,7 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   let areaReservadaUnlocked = false;
   let areaReservadaData = null; // cache do histórico já carregado, nesta sessão
   let confirmingHistRow = null; // histRow do negócio com "Apagar" a pedir confirmação (Ações), ou null
+  let arMonthFilterValue = ''; // '' = todos os meses; ou 'AAAA-MM' — filtro do dropdown "Filtrar por mês" (30/07/2026)
 
   const areaReservadaOverlay = document.getElementById('areaReservadaOverlay');
   const areaReservadaGate = document.getElementById('areaReservadaGate');
@@ -1143,6 +1151,14 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
   areaReservadaOverlay.addEventListener('click', (e)=>{ if(e.target.id==='areaReservadaOverlay') closeAreaReservada(); });
   document.getElementById('areaReservadaExportBtn').addEventListener('click', exportAreaReservadaXlsx);
   document.getElementById('areaReservadaExportPdfBtn').addEventListener('click', exportAreaReservadaPdf);
+  // Ligado uma única vez (o próprio <select> nunca é recriado — só as
+  // <option> lá dentro são repovoadas a cada render) — se isto estivesse
+  // dentro de renderAreaReservadaReport, cada render acumulava mais um
+  // listener duplicado em cima dos anteriores.
+  document.getElementById('arMonthFilter').addEventListener('change', (e)=>{
+    arMonthFilterValue = e.target.value;
+    renderAreaReservadaReport(areaReservadaData);
+  });
 
   function parseHistoricoRows(json){
     // json.rows: [ [histRow, chave, data_conclusao, cliente, nif, tarifario, tipo_negocio, duracao, categoria_comissao, num_produtos, mensalidade_proposta, ponderador, comissao, pago, data_pagamento, atualizado_em], ... ]
@@ -1181,8 +1197,25 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
       const key = String(e.dataConclusao).slice(0,7); // 'AAAA-MM'
       (groups[key] = groups[key] || []).push(e);
     });
-    const monthKeys = Object.keys(groups).sort().reverse();
+    const allMonthKeys = Object.keys(groups).sort().reverse();
 
+    // Filtro "Filtrar por mês" (30/07/2026, pedido do utilizador): dropdown
+    // sempre visível, repovoado a cada render com os meses que existem
+    // mesmo nos dados. Se o mês antes selecionado deixou de ter negócios
+    // (ex: era o único e foi apagado), volta sozinho para "Todos os meses"
+    // em vez de ficar preso a um valor que já não existe.
+    if(!allMonthKeys.includes(arMonthFilterValue)) arMonthFilterValue = '';
+    const monthFilterEl = document.getElementById('arMonthFilter');
+    monthFilterEl.innerHTML = '<option value="">Todos os meses</option>' + allMonthKeys.map(mk=>{
+      const parts = mk.split('-'); const y = parts[0]; const m = parts[1];
+      const label = MESES_PT[(+m)-1] + ' de ' + y;
+      return `<option value="${mk}"${mk===arMonthFilterValue?' selected':''}>${esc(label)}</option>`;
+    }).join('');
+    const monthKeys = arMonthFilterValue ? allMonthKeys.filter(mk=>mk===arMonthFilterValue) : allMonthKeys;
+
+    // Os 3 totais no topo refletem sempre TODOS os negócios, independentemente
+    // do filtro de mês — o filtro só estreita a lista de meses mostrada
+    // abaixo, para os totais continuarem a dar sempre a visão geral certa.
     let totalGeral = 0, totalPago = 0;
     entries.forEach(e=>{
       const v = parseNum(e.comissao) || 0;
@@ -1196,7 +1229,9 @@ table.proposal-grid input:focus{border-color:var(--blue); outline:none;}
 
     const wrap = document.getElementById('arMonths');
     if(monthKeys.length===0){
-      wrap.innerHTML = '<div class="ar-empty">Ainda não há negócios com Data Conclusão + Comissão preenchidas.</div>';
+      wrap.innerHTML = allMonthKeys.length===0
+        ? '<div class="ar-empty">Ainda não há negócios com Data Conclusão + Comissão preenchidas.</div>'
+        : '<div class="ar-empty">Sem negócios neste mês.</div>';
       return;
     }
 
