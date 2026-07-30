@@ -154,9 +154,6 @@ td textarea{
 .conclusao-line{margin-top:6px;}
 .conclusao-label{display:block; font-size:10px; color:var(--text-secondary); margin-bottom:2px;}
 .conclusao-line input{width:100%; font-size:11px; padding:4px 5px;}
-.id-numero-line{margin-top:6px;}
-.id-numero-label{display:block; font-size:10px; color:var(--text-secondary); margin-bottom:2px;}
-.id-numero-line input{width:100%; font-size:11px; padding:4px 5px;}
 .cliente-comissao-edit-line{display:flex; flex-direction:column; gap:4px; margin-top:5px;}
 .cliente-comissao-edit-line select{width:100%; font-size:11px; padding:4px 5px;}
 .comissao-preview{font-size:11px; color:var(--text-secondary); margin-top:5px;}
@@ -949,7 +946,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   let page = 1;
   const pageSize = 50;
 
-  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data','situacao_especial','mensalidade_atual','mensalidade_proposta','ponderador','comissao','tipo_cliente','tipo_negocio','duracao_meses','categoria_comissao','num_produtos','data_conclusao','id_numero'];
+  const COLS = ['data_ativacao','subagente','proxima_refid','fim_fidelizacao','nif','validar_rep','cliente','tarifario','decisor','morada','cp','localidade','contato','email','telemovel','atualizacao','observacoes','estado_contato','estado_data','situacao_especial','mensalidade_atual','mensalidade_proposta','ponderador','comissao','tipo_cliente','tipo_negocio','duracao_meses','categoria_comissao','num_produtos','data_conclusao'];
   // row array from Apps Script: [rowNum, A..AD] -> index i+1 = COLS[i]
   // estado_contato = coluna R, estado_data = coluna S, situacao_especial =
   // coluna T, mensalidade_atual = coluna U, mensalidade_proposta = coluna V,
@@ -1392,7 +1389,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       comissao: get('comissao')||'', tipoCliente: get('tipo_cliente')||'',
       tipoNegocio: get('tipo_negocio')||'', duracaoMeses: get('duracao_meses')||'',
       categoriaComissao: get('categoria_comissao')||'', numProdutos: get('num_produtos')||'',
-      conclusao: get('data_conclusao')||'', idNumero: get('id_numero')||'',
+      conclusao: get('data_conclusao')||'',
       fimDate, fimRaw, proxDate, proxRaw,
       status: s.status, statusLabel: s.statusLabel, expired: s.expired, colorGroup: colorGroupOf(s.status), days
     };
@@ -1402,7 +1399,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     // novos do plano comissional. Sem isto, um cliente com Tipo de cliente
     // preenchido só ficava pesquisável por "novo"/"existente" depois de ser
     // reeditado nessa mesma sessão, não logo ao carregar a página.
-    rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial+' '+rec.tipoCliente+' '+rec.tipoNegocio+' '+rec.categoriaComissao+' '+rec.numProdutos+' '+rec.idNumero).toLowerCase());
+    rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial+' '+rec.tipoCliente+' '+rec.tipoNegocio+' '+rec.categoriaComissao+' '+rec.numProdutos).toLowerCase());
     return rec;
   }
 
@@ -2468,10 +2465,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
           <label class="conclusao-label">Data Conclusão</label>
           <input type="date" class="f-conclusao" value="${esc(conclusaoVal)}" title="Data em que a fidelização/renovação ficou concluída — em conjunto com a Duração (junto ao Tipo de negócio) define o novo Fim de fidelização">
         </div>
-        <div class="id-numero-line">
-          <label class="id-numero-label">Nº ID</label>
-          <input type="text" class="f-id-numero" value="${esc(r.idNumero)}" title="Número de identificação do negócio/processo">
-        </div>
       </td>
       <td class="estado-edit">
         <select class="f-estado">${estadoOptionsHtml}</select>
@@ -2544,10 +2537,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         <div class="conclusao-line">
           <label class="conclusao-label">Data Conclusão</label>
           <input type="date" class="nf-conclusao" title="Data em que a fidelização/renovação ficou concluída — em conjunto com a Duração (junto ao Tipo de negócio) define o novo Fim de fidelização">
-        </div>
-        <div class="id-numero-line">
-          <label class="id-numero-label">Nº ID</label>
-          <input type="text" class="nf-id-numero" title="Número de identificação do negócio/processo">
         </div>
       </td>
       <td class="estado-edit">
@@ -2762,7 +2751,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     const tipoNegocio = val('.f-tipo-negocio');
     const duracaoMeses = val('.f-duracao');
     const conclusao = val('.f-conclusao');
-    const idNumero = val('.f-id-numero').trim();
     const categoriaComissao = val('.f-categoria-comissao');
     const numProdutos = val('.f-num-produtos');
     const observacoes = tr.querySelector('.f-obs').value;
@@ -2788,8 +2776,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email,
       D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial,
       U: mensalidadeAtual, V: mensalidadeProposta, W: ponderador, X: comissaoStr, Y: tipoCliente,
-      Z: tipoNegocio, AA: duracaoMeses, AB: categoriaComissao, AC: numProdutos, AD: conclusao,
-      AE: idNumero
+      Z: tipoNegocio, AA: duracaoMeses, AB: categoriaComissao, AC: numProdutos, AD: conclusao
     };
 
     fetch(API_URL, {
@@ -2807,7 +2794,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         rec.mensalidadeAtual = mensalidadeAtual; rec.mensalidadeProposta = mensalidadeProposta; rec.ponderador = ponderador;
         rec.comissao = comissaoStr; rec.tipoCliente = tipoCliente;
         rec.tipoNegocio = tipoNegocio; rec.duracaoMeses = duracaoMeses; rec.conclusao = conclusao;
-        rec.idNumero = idNumero;
         rec.categoriaComissao = categoriaComissao; rec.numProdutos = numProdutos;
         rec.fimRaw = fim || null; rec.fimDate = parseISO(fim);
         rec.proxRaw = prox || null; rec.proxDate = parseISO(prox);
@@ -2815,7 +2801,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         const s = statusFromDays(days, rec.fimRaw, situacaoEspecial);
         rec.days = days; rec.status = s.status; rec.statusLabel = s.statusLabel; rec.expired = s.expired;
         rec.colorGroup = colorGroupOf(s.status);
-        rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial+' '+rec.tipoCliente+' '+rec.tipoNegocio+' '+rec.categoriaComissao+' '+rec.numProdutos+' '+rec.idNumero).toLowerCase());
+        rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial+' '+rec.tipoCliente+' '+rec.tipoNegocio+' '+rec.categoriaComissao+' '+rec.numProdutos).toLowerCase());
       }
       editingRowNum = null;
       setSyncState('ok');
@@ -2896,7 +2882,6 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     const tipoNegocio = val('.nf-tipo-negocio');
     const duracaoMeses = val('.nf-duracao');
     const conclusao = val('.nf-conclusao');
-    const idNumero = val('.nf-id-numero').trim();
     const categoriaComissao = val('.nf-categoria-comissao');
     const numProdutos = val('.nf-num-produtos');
     const observacoes = tr.querySelector('.nf-obs').value;
@@ -2926,8 +2911,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       G: cliente, E: nif, H: tarifario, M: contato, O: telemovel, N: email,
       D: fim, C: prox, R: estadoContato, S: estadoData, Q: observacoes, T: situacaoEspecial,
       U: mensalidadeAtual, V: mensalidadeProposta, W: ponderador, X: comissaoStr, Y: tipoCliente,
-      Z: tipoNegocio, AA: duracaoMeses, AB: categoriaComissao, AC: numProdutos, AD: conclusao,
-      AE: idNumero
+      Z: tipoNegocio, AA: duracaoMeses, AB: categoriaComissao, AC: numProdutos, AD: conclusao
     };
 
     fetch(API_URL, {
@@ -2947,11 +2931,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         localidade: '', contato, email, telemovel, observacoes,
         estadoContato, estadoData, situacaoEspecial,
         mensalidadeAtual, mensalidadeProposta, ponderador, comissao: comissaoStr, tipoCliente,
-        tipoNegocio, duracaoMeses, conclusao, idNumero, categoriaComissao, numProdutos,
+        tipoNegocio, duracaoMeses, conclusao, categoriaComissao, numProdutos,
         fimDate, fimRaw: fim || null, proxDate, proxRaw: prox || null,
         status: s.status, statusLabel: s.statusLabel, expired: s.expired, colorGroup: colorGroupOf(s.status), days
       };
-      rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial+' '+rec.tipoCliente+' '+rec.tipoNegocio+' '+rec.categoriaComissao+' '+rec.numProdutos+' '+rec.idNumero).toLowerCase());
+      rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial+' '+rec.tipoCliente+' '+rec.tipoNegocio+' '+rec.categoriaComissao+' '+rec.numProdutos).toLowerCase());
       records.unshift(rec);
       creatingNew = false;
       setSyncState('ok');
