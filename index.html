@@ -1839,6 +1839,25 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   // vez de rebentar com um erro de JavaScript não tratado.
   function exportAreaReservadaPdf(){
     if(!areaReservadaData || !areaReservadaData.length) return;
+    // Exportar PDF respeita os filtros ativos da Área Reservada (30/07/2026,
+    // pedido do utilizador: "quero exportar para pdf mediante o filtro
+    // utilizado... esta a enviar tudo sem respeitar as filtragens") — mesma
+    // lógica de filtragem já usada em renderAreaReservadaReport(). Ao
+    // contrário do ecrã (onde os 3 totais no topo mostram sempre TUDO,
+    // independentemente do filtro), o utilizador confirmou que quer o PDF
+    // totalmente coerente consigo mesmo: com um filtro ativo, os totais no
+    // PDF refletem só o que foi filtrado, não o total geral de tudo.
+    const dadosFiltrados = areaReservadaData.filter(e=>{
+      if(arMonthFilterValue && String(e.dataConclusao).slice(0,7) !== arMonthFilterValue) return false;
+      if(arPagoFilterValue === 'pago' && !e.pago) return false;
+      if(arPagoFilterValue === 'porpagar' && e.pago) return false;
+      return true;
+    });
+    if(!dadosFiltrados.length){
+      areaReservadaStatus.textContent = 'Sem negócios para exportar com o filtro atual.';
+      areaReservadaStatus.className = 'proposal-status error';
+      return;
+    }
     if(!window.jspdf || !window.jspdf.jsPDF){
       areaReservadaStatus.textContent = 'Não foi possível carregar o gerador de PDF (verifica a ligação à internet e tenta outra vez).';
       areaReservadaStatus.className = 'proposal-status error';
@@ -1864,16 +1883,35 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       const stamp = new Date();
       const dataGeracao = String(stamp.getDate()).padStart(2,'0')+'/'+String(stamp.getMonth()+1).padStart(2,'0')+'/'+stamp.getFullYear();
 
+      // Descrição do filtro ativo (se houver) — mostrada no PDF para o
+      // documento fazer sentido sozinho para quem o ler mais tarde, sem
+      // precisar de saber que filtro estava ativo no ecrã no momento em
+      // que foi exportado.
+      const partesFiltro = [];
+      if(arMonthFilterValue){
+        const fp = arMonthFilterValue.split('-');
+        partesFiltro.push(MESES_PT[(+fp[1])-1] + ' de ' + fp[0]);
+      }
+      if(arPagoFilterValue === 'pago') partesFiltro.push('só Pago');
+      if(arPagoFilterValue === 'porpagar') partesFiltro.push('só Por pagar');
+      const filtroDescricao = partesFiltro.join(' · ');
+
       doc.setFont('helvetica','bold'); doc.setFontSize(17); doc.setTextColor(inkDark);
       doc.text('Relatório de Comissões', marginX, 50);
       doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(inkGray);
       doc.text('Gestão de Fidelizações', marginX, 66);
       doc.text('Gerado a ' + dataGeracao, pageW - marginX, 66, { align:'right' });
+      let dividerY = 78;
+      if(filtroDescricao){
+        doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(inkGray);
+        doc.text('Filtro ativo: ' + filtroDescricao, marginX, 78);
+        dividerY = 90;
+      }
       doc.setDrawColor(inkLine); doc.setLineWidth(1);
-      doc.line(marginX, 78, pageW - marginX, 78);
+      doc.line(marginX, dividerY, pageW - marginX, dividerY);
 
       let totalGeral=0, totalPago=0;
-      areaReservadaData.forEach(e=>{ const v=parseNum(e.comissao)||0; totalGeral+=v; if(e.pago) totalPago+=v; });
+      dadosFiltrados.forEach(e=>{ const v=parseNum(e.comissao)||0; totalGeral+=v; if(e.pago) totalPago+=v; });
       const totalPorPagar = totalGeral - totalPago;
       const statW = (pageW - marginX*2)/3;
       const stats = [
@@ -1881,24 +1919,25 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         {label:'JÁ RECEBIDO', value: fmtEuro(totalPago), color: good},
         {label:'TOTAL GERAL', value: fmtEuro(totalGeral), color: inkDark},
       ];
+      const statsLabelY = dividerY + 18, statsValueY = dividerY + 36, divider2Y = dividerY + 50;
       stats.forEach((s,i)=>{
         const x = marginX + i*statW;
         doc.setFont('helvetica','normal'); doc.setFontSize(8.5); doc.setTextColor(inkGray);
-        doc.text(s.label, x, 96);
+        doc.text(s.label, x, statsLabelY);
         doc.setFont('helvetica','bold'); doc.setFontSize(15); doc.setTextColor(s.color);
-        doc.text(s.value, x, 114);
+        doc.text(s.value, x, statsValueY);
       });
       doc.setDrawColor(inkLine); doc.setLineWidth(1);
-      doc.line(marginX, 128, pageW - marginX, 128);
+      doc.line(marginX, divider2Y, pageW - marginX, divider2Y);
 
       const groups = {};
-      areaReservadaData.forEach(e=>{
+      dadosFiltrados.forEach(e=>{
         const key = String(e.dataConclusao).slice(0,7);
         (groups[key] = groups[key] || []).push(e);
       });
       const monthKeys = Object.keys(groups).sort().reverse();
 
-      let y = 148;
+      let y = dividerY + 70;
       monthKeys.forEach(mk=>{
         const parts = mk.split('-'); const my = parts[0]; const mm = parts[1];
         const label = (MESES_PT[(+mm)-1]||'') + ' de ' + my;
@@ -1945,7 +1984,13 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       }
 
       const yF = stamp.getFullYear(), mF = String(stamp.getMonth()+1).padStart(2,'0'), dF = String(stamp.getDate()).padStart(2,'0');
-      doc.save(`comissoes_mensais_${yF}${mF}${dF}.pdf`);
+      // Nome do ficheiro também reflete o filtro ativo (ex: "_202603_porpagar")
+      // — evita ficheiros todos com o mesmo nome ao exportar vários filtros
+      // diferentes no mesmo dia.
+      let sufixoFiltro = '';
+      if(arMonthFilterValue) sufixoFiltro += '_' + arMonthFilterValue.replace('-','');
+      if(arPagoFilterValue) sufixoFiltro += '_' + arPagoFilterValue;
+      doc.save(`comissoes_mensais_${yF}${mF}${dF}${sufixoFiltro}.pdf`);
     } catch(err){
       areaReservadaStatus.textContent = 'Falha ao gerar PDF: ' + err.message;
       areaReservadaStatus.className = 'proposal-status error';
