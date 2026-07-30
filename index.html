@@ -153,7 +153,13 @@ td textarea{
 .negocio-edit-line select{flex:1 1 auto; width:auto; min-width:0; font-size:11px; padding:4px 5px;}
 .conclusao-line{margin-top:6px;}
 .conclusao-label{display:block; font-size:10px; color:var(--text-secondary); margin-bottom:2px;}
+.conclusao-pago-status{font-weight:700;}
+.conclusao-pago-status.pago{color:var(--good);}
+.conclusao-pago-status.nao-pago{color:var(--critical);}
+.conclusao-pago-status.unknown, .conclusao-pago-status.pending{color:var(--text-muted);}
 .conclusao-line input{width:100%; font-size:11px; padding:4px 5px;}
+.conclusao-line input.f-conclusao.pago{border-color:var(--good); background:var(--good-bg); color:var(--good);}
+.conclusao-line input.f-conclusao.nao-pago{border-color:var(--critical); background:var(--critical-bg); color:var(--critical);}
 .cliente-comissao-edit-line{display:flex; flex-direction:column; gap:4px; margin-top:5px;}
 .cliente-comissao-edit-line select{width:100%; font-size:11px; padding:4px 5px;}
 .comissao-preview{font-size:11px; color:var(--text-secondary); margin-top:5px;}
@@ -1685,13 +1691,59 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   });
 
   function parseHistoricoRows(json){
-    // json.rows: [ [histRow, chave, data_conclusao, cliente, nif, tarifario, tipo_negocio, duracao, categoria_comissao, num_produtos, mensalidade_proposta, ponderador, comissao, pago, data_pagamento, atualizado_em], ... ]
+    // json.rows: [ [histRow, chave, data_conclusao, cliente, nif, tarifario, tipo_negocio, duracao, categoria_comissao, num_produtos, mensalidade_proposta, ponderador, comissao, pago, data_pagamento, atualizado_em, geral_row], ... ]
     return (json.rows||[]).map(r=>({
       histRow: r[0], chave: r[1], dataConclusao: r[2], cliente: r[3], nif: r[4],
       tarifario: r[5], tipoNegocio: r[6], duracao: r[7], categoriaComissao: r[8],
       numProdutos: r[9], mensalidadeProposta: r[10], ponderador: r[11], comissao: r[12],
-      pago: r[13]==='Sim', dataPagamento: r[14], atualizadoEm: r[15]
+      pago: r[13]==='Sim', dataPagamento: r[14], atualizadoEm: r[15], geralRow: r[16]
     })).filter(r=>r.dataConclusao && parseNum(r.comissao)!==null);
+  }
+
+  function chaveDe(nif, cliente){
+    const n = String(nif||'').trim();
+    return n!=='' ? n : ('NOME:' + String(cliente||'').trim());
+  }
+
+  const CONCLUSAO_STATUS_LABEL = { pago:'Pago', 'nao-pago':'Por pagar', unknown:'Sem registo de comissão', pending:'A verificar…' };
+
+  // Estado de pagamento da comissão associada à Data Conclusão ATUAL de um
+  // registo da "Geral" — usado só no formulário de edição (pedido do
+  // utilizador, 30/07/2026) para colorir o campo Data Conclusão:
+  //   'pago'     -> já há entrada no histórico para esta data exata, paga
+  //   'nao-pago' -> já há entrada no histórico para esta data exata, por pagar
+  //   'unknown'  -> Data Conclusão preenchida mas ainda sem entrada correspondente
+  //                 no histórico (ex: Comissão ainda não calculável)
+  //   'pending'  -> histórico ainda não foi carregado nesta sessão
+  //   null       -> sem Data Conclusão (nada a mostrar, estado normal)
+  // Procura primeiro por geralRow (identifica a linha de origem com
+  // precisão, tal como o backend em upsertHistoricoComissao_) e só recorre
+  // a chave+data como reserva para entradas antigas sem geralRow gravado.
+  function historicoStatusFor(r){
+    if(!r.conclusao) return null;
+    if(!areaReservadaData) return 'pending';
+    let entry = areaReservadaData.find(e => String(e.geralRow||'')===String(r.rowNum) && e.dataConclusao===r.conclusao);
+    if(!entry){
+      const chave = chaveDe(r.nif, r.cliente);
+      entry = areaReservadaData.find(e => e.chave===chave && e.dataConclusao===r.conclusao);
+    }
+    if(!entry) return 'unknown';
+    return entry.pago ? 'pago' : 'nao-pago';
+  }
+
+  // Vai buscar o histórico de comissões ao servidor e guarda-o em cache
+  // (areaReservadaData) para esta sessão — partilhado entre a Área
+  // Reservada e o indicador de pago/não pago no formulário de edição, para
+  // não pedir os mesmos dados duas vezes. Devolve os dados já parseados
+  // (ou lança erro, para quem chamar decidir como reagir).
+  async function ensureHistoricoLoaded(forceReload){
+    if(areaReservadaData && !forceReload) return areaReservadaData;
+    const url = API_URL + '?token=' + encodeURIComponent(TOKEN) + '&action=historico';
+    const resp = await fetch(url, {method:'GET'});
+    const json = await resp.json();
+    if(json.ok===false) throw new Error(json.error||'erro desconhecido');
+    areaReservadaData = parseHistoricoRows(json);
+    return areaReservadaData;
   }
 
   async function loadAreaReservadaReport(forceReload){
@@ -1702,11 +1754,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     areaReservadaStatus.textContent = 'A carregar…';
     areaReservadaStatus.className = 'proposal-status';
     try{
-      const url = API_URL + '?token=' + encodeURIComponent(TOKEN) + '&action=historico';
-      const resp = await fetch(url, {method:'GET'});
-      const json = await resp.json();
-      if(json.ok===false) throw new Error(json.error||'erro desconhecido');
-      areaReservadaData = parseHistoricoRows(json);
+      await ensureHistoricoLoaded(forceReload);
       areaReservadaStatus.textContent = '';
       renderAreaReservadaReport(areaReservadaData);
     } catch(err){
@@ -2818,6 +2866,14 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     const fimVal = toDateInputValue(r.fimDate, r.fimRaw);
     const proxVal = toDateInputValue(r.proxDate, r.proxRaw);
     const conclusaoVal = toDateInputValue(parseISO(r.conclusao), r.conclusao);
+    // Indicador visual de pago/não pago (pedido do utilizador, 30/07/2026) —
+    // só no formulário de edição, ver historicoStatusFor().
+    const conclusaoStatusKey = historicoStatusFor(r); // null | 'pago' | 'nao-pago' | 'unknown' | 'pending'
+    const conclusaoStatusLabelHtml = conclusaoStatusKey
+      ? ` <span class="conclusao-pago-status ${conclusaoStatusKey}">· ${CONCLUSAO_STATUS_LABEL[conclusaoStatusKey]}</span>` : '';
+    const conclusaoInputStatusClass = (conclusaoStatusKey==='pago' || conclusaoStatusKey==='nao-pago') ? (' '+conclusaoStatusKey) : '';
+    const conclusaoTitleTxt = 'Data em que a fidelização/renovação ficou concluída — em conjunto com a Duração (junto ao Tipo de negócio) define o novo Fim de fidelização'
+      + (conclusaoStatusKey ? ' | Comissão: ' + CONCLUSAO_STATUS_LABEL[conclusaoStatusKey] : '');
     const comissaoInitVal = comissaoDe(r.mensalidadeProposta, r.ponderador);
     const comissaoInitHtml = comissaoInitVal!==null ? fmtEuro(comissaoInitVal) : '—';
     const estadoOptionsHtml = ['<option value="">Sem estado</option>']
@@ -2876,8 +2932,8 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       <td>
         <input type="date" class="f-prox" value="${proxVal}" readonly title="Calculado automaticamente: 180 dias antes do Fim de fidelização (90 dias nos tarifários M Movel, Shift e BLM)">
         <div class="conclusao-line">
-          <label class="conclusao-label">Data Conclusão</label>
-          <input type="date" class="f-conclusao" value="${esc(conclusaoVal)}" title="Data em que a fidelização/renovação ficou concluída — em conjunto com a Duração (junto ao Tipo de negócio) define o novo Fim de fidelização">
+          <label class="conclusao-label">Data Conclusão${conclusaoStatusLabelHtml}</label>
+          <input type="date" class="f-conclusao${conclusaoInputStatusClass}" value="${esc(conclusaoVal)}" title="${esc(conclusaoTitleTxt)}">
         </div>
       </td>
       <td class="estado-edit">
@@ -3041,9 +3097,19 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       });
       tableWrap.querySelectorAll('.edit-row-btn').forEach(btn=>{
         btn.addEventListener('click', ()=>{
-          editingRowNum = +btn.closest('tr').getAttribute('data-row');
+          const rowNum = +btn.closest('tr').getAttribute('data-row');
+          editingRowNum = rowNum;
           confirmingDeleteRowNum = null;
           render();
+          // Indicador de pago/não pago na Data Conclusão: se o histórico
+          // ainda não está em cache, vai buscá-lo em segundo plano e volta a
+          // desenhar — só se o utilizador continuar a editar esta mesma
+          // linha (evita mudar a cor numa linha diferente entretanto aberta).
+          if(!areaReservadaData){
+            ensureHistoricoLoaded().then(()=>{
+              if(editingRowNum===rowNum) render();
+            }).catch(()=>{ /* sem histórico disponível — campo fica sem cor, edição continua normal */ });
+          }
         });
       });
       // Tal como na folha Excel original, mudar a data de Fim de fidelização
@@ -3218,6 +3284,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         rec.searchBlob = stripAccents((rec.cliente+' '+rec.nif+' '+rec.contato+' '+rec.email+' '+rec.telemovel+' '+rec.subagente+' '+rec.tarifario+' '+rec.localidade+' '+rec.observacoes+' '+rec.estadoContato+' '+rec.situacaoEspecial+' '+rec.tipoCliente+' '+rec.tipoNegocio+' '+rec.categoriaComissao+' '+rec.numProdutos).toLowerCase());
       }
       editingRowNum = null;
+      // O histórico de comissões pode ter mudado com esta gravação (nova
+      // entrada, correção da existente, etc.) — invalida a cache para que,
+      // da próxima vez que se editar alguém (ou se abrir a Área Reservada),
+      // se vá buscar dados frescos, em vez de mostrar pago/não pago
+      // desatualizado.
+      areaReservadaData = null;
       setSyncState('ok');
       populateFilterOptions();
       renderTiles();
