@@ -1887,13 +1887,16 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       // documento fazer sentido sozinho para quem o ler mais tarde, sem
       // precisar de saber que filtro estava ativo no ecrã no momento em
       // que foi exportado.
+      // Cada parte já vem com o seu próprio rótulo ("Mês:"/"Estado:") em vez
+      // de um prefixo genérico "Filtro ativo:" — pedido do utilizador
+      // (30/07/2026, com screenshot do PDF): "muda 'filtro ativo' para Mês".
       const partesFiltro = [];
       if(arMonthFilterValue){
         const fp = arMonthFilterValue.split('-');
-        partesFiltro.push(MESES_PT[(+fp[1])-1] + ' de ' + fp[0]);
+        partesFiltro.push('Mês: ' + MESES_PT[(+fp[1])-1] + ' de ' + fp[0]);
       }
-      if(arPagoFilterValue === 'pago') partesFiltro.push('só Pago');
-      if(arPagoFilterValue === 'porpagar') partesFiltro.push('só Por pagar');
+      if(arPagoFilterValue === 'pago') partesFiltro.push('Estado: Pago');
+      if(arPagoFilterValue === 'porpagar') partesFiltro.push('Estado: Por pagar');
       const filtroDescricao = partesFiltro.join(' · ');
 
       doc.setFont('helvetica','bold'); doc.setFontSize(17); doc.setTextColor(inkDark);
@@ -1904,7 +1907,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       let dividerY = 78;
       if(filtroDescricao){
         doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(inkGray);
-        doc.text('Filtro ativo: ' + filtroDescricao, marginX, 78);
+        doc.text(filtroDescricao, marginX, 78);
         dividerY = 90;
       }
       doc.setDrawColor(inkLine); doc.setLineWidth(1);
