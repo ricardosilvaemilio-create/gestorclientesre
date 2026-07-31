@@ -1951,14 +1951,22 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
   // noutro mes") — a correspondência nunca olha para negócios de outros
   // meses, mesmo que o NIF também lá apareça.
   let arImportMatches = null; // guarda os itens "por pagar" da última pré-visualização, para o botão Confirmar usar
+  let arImportReportCtx = null; // guarda tudo o que a última pré-visualização calculou, para o botão "Descarregar relatório" usar (31/07/2026)
+
+  // "AAAA-MM" -> "Mês de AAAA" (ex: "2026-04" -> "Abril de 2026") — usado em
+  // vários sítios do "Importar da operadora" (dropdown de meses, indicação
+  // de "noutro mês", exportações), por isso ficou como função própria em
+  // vez de repetir a mesma conta em cada sítio.
+  function mesLabelDe_(mk){
+    if(!mk) return '';
+    const parts = String(mk).split('-'); const y = parts[0]; const m = parts[1];
+    return (MESES_PT[(+m)-1]||'') + ' de ' + y;
+  }
 
   function mesesDisponiveisArImport_(){
     const chaves = new Set();
     (areaReservadaData||[]).forEach(e=>{ if(e.dataConclusao) chaves.add(String(e.dataConclusao).slice(0,7)); });
-    return Array.from(chaves).sort().reverse().map(mk=>{
-      const parts = mk.split('-'); const y = parts[0]; const m = parts[1];
-      return { key: mk, label: MESES_PT[(+m)-1] + ' de ' + y };
-    });
+    return Array.from(chaves).sort().reverse().map(mk=>({ key: mk, label: mesLabelDe_(mk) }));
   }
 
   function abrirArImportPanel(){
@@ -1972,6 +1980,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     arReportView.classList.remove('hidden');
     arImportBody.innerHTML = '';
     arImportMatches = null;
+    arImportReportCtx = null;
   }
 
   function renderArImportStep1_(){
@@ -2147,8 +2156,18 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
 
       if(candidatosNif.length === 0){
         const jaPagoDoMes = candidatosMes.find(e => e.pago && String(e.nif||'').trim() === String(p.nif).trim());
-        if(jaPagoDoMes) jaPagas.push({ pdf: p, entry: jaPagoDoMes });
-        else naoEncontradas.push(p);
+        if(jaPagoDoMes){ jaPagas.push({ pdf: p, entry: jaPagoDoMes }); return; }
+        // Distingue duas situações bem diferentes dentro de "sem
+        // correspondência" (pedido do utilizador, 31/07/2026: "há negocios
+        // que estaõ no pdf e que nao estava no ciclo de comissoes do mes de
+        // abril e nao me avisaste") — procura o NIF em QUALQUER mês (não só
+        // no escolhido): se existir noutro mês, é uma exclusão esperada (o
+        // carregamento é sempre restrito a um mês só, de propósito, ver nota
+        // acima); se não existir em mês nenhum, é um NIF nunca registado —
+        // esse sim merece atenção, é o caso realmente novo/desconhecido.
+        const nifTrim = String(p.nif||'').trim();
+        const noutroMes = nifTrim!=='' ? (areaReservadaData||[]).find(e => String(e.nif||'').trim() === nifTrim) : null;
+        naoEncontradas.push({ ...p, outroMes: noutroMes ? String(noutroMes.dataConclusao).slice(0,7) : null });
         return;
       }
 
@@ -2170,12 +2189,22 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       porPagar.push({ pdf: p, entry: escolhido, divergente, ambiguo });
     });
 
-    return { porPagar, jaPagas, naoEncontradas };
+    // O que sobra em porReclamar são negócios por pagar deste mês que nenhuma
+    // linha do PDF reclamou — ou seja, "estava lançado na app mas não aparece
+    // no PDF da operadora" (pedido do utilizador, 31/07/2026, para o
+    // relatório de conferência — ver exportArImportReport_ mais abaixo).
+    return { porPagar, jaPagas, naoEncontradas, semPdf: porReclamar };
   }
 
   function renderArImportPreview_(linhasPdf, mesSelecionado, mesLabel){
-    const { porPagar, jaPagas, naoEncontradas } = matchArImportRows_(linhasPdf, mesSelecionado);
+    const { porPagar, jaPagas, naoEncontradas, semPdf } = matchArImportRows_(linhasPdf, mesSelecionado);
     arImportMatches = porPagar;
+    // Guarda tudo o que o relatório de conferência precisa (pedido do
+    // utilizador, 31/07/2026: "um relatório no fim de inserir o pdf e a
+    // leitura com os negócios que tenho lançados") — feito aqui e não dentro
+    // de exportArImportReport_ porque essa função corre só ao clicar no
+    // botão, depois deste ecrã já ter sido construído.
+    arImportReportCtx = { linhasPdf, mesSelecionado, mesLabel, porPagar, jaPagas, naoEncontradas, semPdf };
 
     let html = `<div class="ar-import-intro"><p>${linhasPdf.length} linha(s) lidas do PDF. A validar só contra <strong>${esc(mesLabel)}</strong> — negócios noutros meses não são tocados, mesmo com o mesmo NIF.</p></div>`;
 
@@ -2206,23 +2235,229 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
     }
 
     if(naoEncontradas.length){
+      // Duas listas bem separadas (pedido do utilizador, 31/07/2026: "há
+      // negocios que estaõ no pdf e que nao estava no ciclo de comissoes do
+      // mes de abril e nao me avisaste") — a 1ª é esperada/por desenho (o
+      // carregamento é sempre restrito a um mês só), a 2ª é que merece
+      // mesmo atenção, por ser um NIF que a app nunca viu em mês nenhum.
+      const deOutroMes = naoEncontradas.filter(p=>p.outroMes);
+      const nuncaRegistados = naoEncontradas.filter(p=>!p.outroMes);
+      if(deOutroMes.length){
+        html += `<div class="ar-import-section">
+          <h4>${deOutroMes.length} linha(s) do PDF de negócio(s) noutro mês — não tocadas de propósito</h4>
+          <p class="ar-import-section-hint">O NIF já existe na app, mas com Data Conclusão de outro mês — o carregamento só valida o mês escolhido (${esc(mesLabel)}), mesmo que o mesmo NIF apareça noutro mês: ${deOutroMes.map(p=>esc((p.cliente||'—') + ' (' + p.nif + ') — ' + mesLabelDe_(p.outroMes))).join(', ')}</p>
+        </div>`;
+      }
+      if(nuncaRegistados.length){
+        html += `<div class="ar-import-section">
+          <h4>${nuncaRegistados.length} linha(s) do PDF com NIF nunca registado na app</h4>
+          <p class="ar-import-section-hint">Este NIF não existe em nenhum negócio da app, em nenhum mês — pode ser um negócio ainda por lançar, ou o NIF estar diferente do registado: ${nuncaRegistados.map(p=>esc((p.cliente||'—') + ' (' + p.nif + ')')).join(', ')}</p>
+        </div>`;
+      }
+    }
+
+    // Direção inversa da secção anterior: negócios por pagar deste mês que
+    // não apareceram em nenhuma linha do PDF (pedido do utilizador,
+    // 31/07/2026: "o que estava na app e não aparece no ficheiro").
+    if(semPdf.length){
       html += `<div class="ar-import-section">
-        <h4>${naoEncontradas.length} linha(s) do PDF sem correspondência em ${esc(mesLabel)}</h4>
-        <p class="ar-import-section-hint">NIF não encontrado num negócio por pagar deste mês — pode ser de outro mês (de propósito, não é tocado por aqui), ainda não ter sido registado, ou o NIF estar diferente: ${naoEncontradas.map(p=>esc((p.cliente||'—') + ' (' + p.nif + ')')).join(', ')}</p>
+        <h4>${semPdf.length} negócio(s) lançado(s) em ${esc(mesLabel)} sem correspondência no PDF</h4>
+        <p class="ar-import-section-hint">Por pagar nesta app, mas o NIF não aparece em nenhuma linha do PDF importado — pode ser de operadora diferente, ainda não ter chegado à operadora, ou o NIF estar diferente: ${semPdf.map(e=>esc((e.cliente||'—') + ' (' + (e.nif||'—') + ')')).join(', ')}</p>
       </div>`;
     }
 
     html += `<div class="ar-import-actions">
       <button class="btn" id="arImportVoltarBtn2" type="button">Voltar</button>
+      <button class="btn" id="arImportReportBtn" type="button">Descarregar relatório (Excel)</button>
+      <button class="btn" id="arImportReportPdfBtn" type="button">Descarregar relatório (PDF)</button>
       <button class="btn" id="arImportCancelBtn2" type="button">Cancelar</button>
       <button class="btn primary" id="arImportConfirmBtn" type="button"${porPagar.length?'':' disabled'}>Marcar selecionados como pagos</button>
     </div>`;
 
     arImportBody.innerHTML = html;
     document.getElementById('arImportVoltarBtn2').addEventListener('click', renderArImportStep1_);
+    document.getElementById('arImportReportBtn').addEventListener('click', exportArImportReport_);
+    document.getElementById('arImportReportPdfBtn').addEventListener('click', exportArImportReportPdf_);
     document.getElementById('arImportCancelBtn2').addEventListener('click', closeArImportPanel);
     const confirmBtn = document.getElementById('arImportConfirmBtn');
     if(confirmBtn) confirmBtn.addEventListener('click', confirmArImport_);
+  }
+
+  // Relatório de conferência da importação, para descarregar e arquivar —
+  // pedido do utilizador (31/07/2026): "eu queria que fizesse um relatorio
+  // no fim de inserir o pdf e a leitura com os negócios que tenho
+  // lançados". 4 folhas Excel: os que ficaram correspondidos (vão/foram
+  // marcados como pagos), os que já estavam pagos, e as 2 direções da
+  // divergência que o utilizador pediu para conseguir ver — o que está no
+  // PDF sem corresponder a um negócio lançado, e o que está lançado sem
+  // corresponder a nenhuma linha do PDF. Usa a mesma biblioteca XLSX (já
+  // carregada por CDN) que exportAreaReservadaXlsx().
+  function exportArImportReport_(){
+    if(!arImportReportCtx) return;
+    const { mesSelecionado, mesLabel, porPagar, jaPagas, naoEncontradas, semPdf } = arImportReportCtx;
+
+    function folha(headers, rows){
+      const aoa = [headers].concat(rows);
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      ws['!cols'] = headers.map((h,i)=>{
+        let max = String(h).length;
+        aoa.forEach(row=>{ const v = row[i]; if(v!=null) max = Math.max(max, String(v).length); });
+        return { wch: Math.min(Math.max(max+2, 10), 40) };
+      });
+      return ws;
+    }
+
+    const wb = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(wb, folha(
+      ['Cliente','NIF','Nº Id (operadora)','Tipo Com.','Comissão (PDF)','Comissão (registada)','Divergência','NIF ambíguo — confirmar'],
+      porPagar.map(it=>[
+        it.entry.cliente||'', it.pdf.nif||'', it.pdf.nId||'', it.pdf.tipoCom||'',
+        parseNum(it.pdf.comissao)||0, parseNum(it.entry.comissao)||0,
+        it.divergente?'Sim':'Não', it.ambiguo?'Sim':'Não'
+      ])
+    ), 'Correspondidos');
+
+    XLSX.utils.book_append_sheet(wb, folha(
+      ['Nº Id (operadora)','NIF','Cliente (PDF)','Tipo Com.','Comissão (PDF)','Motivo'],
+      naoEncontradas.map(p=>[ p.nId||'', p.nif||'', p.cliente||'', p.tipoCom||'', parseNum(p.comissao)||0,
+        p.outroMes ? ('Outro mês: ' + mesLabelDe_(p.outroMes)) : 'NIF nunca registado' ])
+    ), 'PDF sem correspondência');
+
+    XLSX.utils.book_append_sheet(wb, folha(
+      ['Cliente','NIF','Tarifário','Tipo de negócio','Comissão (registada)'],
+      semPdf.map(e=>[ e.cliente||'', e.nif||'', e.tarifario||'', e.tipoNegocio||'', parseNum(e.comissao)||0 ])
+    ), 'Lançados sem PDF');
+
+    XLSX.utils.book_append_sheet(wb, folha(
+      ['Cliente','NIF','Nº Id (operadora)','Comissão (PDF)','Data de pagamento (já registada)'],
+      jaPagas.map(it=>[ it.entry.cliente||'', it.pdf.nif||'', it.pdf.nId||'', parseNum(it.pdf.comissao)||0, it.entry.dataPagamento||'' ])
+    ), 'Já pagos');
+
+    const stamp = new Date();
+    const y = stamp.getFullYear(), m = String(stamp.getMonth()+1).padStart(2,'0'), d = String(stamp.getDate()).padStart(2,'0');
+    XLSX.writeFile(wb, `importacao_operadora_${mesSelecionado}_${y}${m}${d}.xlsx`);
+  }
+
+  // Mesmo relatório de conferência acima, em PDF — pedido direto do
+  // utilizador (31/07/2026, mesmo dia): "queria que no fim me devolvesses
+  // um documento pdf com o resultado de diferencas". Usa jsPDF +
+  // jspdf-autotable, EMBUTIDOS diretamente no HTML (mesmo par de bibliotecas
+  // já usado por exportAreaReservadaPdf() — ver secção "Segunda falha e
+  // correção definitiva" no esquema) — ao contrário do XLSX (ainda por CDN),
+  // este não depende de nenhuma ligação externa no momento de gerar.
+  // Mesmo layout/paleta de cores do "Exportar PDF" já existente na Área
+  // Reservada, para os dois ficarem visualmente consistentes.
+  function exportArImportReportPdf_(){
+    if(!arImportReportCtx) return;
+    const { mesSelecionado, mesLabel, porPagar, jaPagas, naoEncontradas, semPdf } = arImportReportCtx;
+    if(!window.jspdf || !window.jspdf.jsPDF || typeof window.jspdf.jsPDF !== 'function'){
+      areaReservadaStatus.textContent = 'Não foi possível carregar o gerador de PDF.';
+      areaReservadaStatus.className = 'proposal-status error';
+      return;
+    }
+    try{
+      const { jsPDF } = window.jspdf;
+      const doc = new jsPDF({ unit:'pt', format:'a4' });
+      if(typeof doc.autoTable !== 'function'){
+        areaReservadaStatus.textContent = 'Não foi possível preparar a tabela do PDF (biblioteca incompleta). Tenta recarregar a página e exportar outra vez.';
+        areaReservadaStatus.className = 'proposal-status error';
+        return;
+      }
+      const pageW = doc.internal.pageSize.getWidth();
+      const pageH = doc.internal.pageSize.getHeight();
+      const marginX = 40;
+      const inkDark = '#0b0b0b', inkGray = '#6b6a64', inkLine = '#e1e0d9', good = '#0ca30c', serious = '#ec835a';
+      const stamp = new Date();
+      const dataGeracao = String(stamp.getDate()).padStart(2,'0')+'/'+String(stamp.getMonth()+1).padStart(2,'0')+'/'+stamp.getFullYear();
+
+      doc.setFont('helvetica','bold'); doc.setFontSize(17); doc.setTextColor(inkDark);
+      doc.text('Relatório de Importação — Operadora', marginX, 50);
+      doc.setFont('helvetica','normal'); doc.setFontSize(10); doc.setTextColor(inkGray);
+      doc.text('Gestão de Fidelizações', marginX, 66);
+      doc.text('Gerado a ' + dataGeracao, pageW - marginX, 66, { align:'right' });
+      doc.setFont('helvetica','normal'); doc.setFontSize(9); doc.setTextColor(inkGray);
+      doc.text('Mês: ' + mesLabel, marginX, 78);
+      doc.setDrawColor(inkLine); doc.setLineWidth(1);
+      doc.line(marginX, 90, pageW - marginX, 90);
+
+      let y = 116;
+      function secTitle(txt, corValor){
+        if(y > pageH - 90){ doc.addPage(); y = 50; }
+        doc.setFont('helvetica','bold'); doc.setFontSize(11.5); doc.setTextColor(corValor||inkDark);
+        doc.text(txt, marginX, y);
+        y += 8;
+      }
+      function tabela(head, body, colStylesExtra){
+        if(!body.length){ y += 14; return; }
+        doc.autoTable({
+          startY: y,
+          margin: { left: marginX, right: marginX },
+          head: [head],
+          body: body,
+          theme: 'plain',
+          styles:{ font:'helvetica', fontSize:8.5, textColor: inkDark, cellPadding:{top:4,bottom:4,left:0,right:6} },
+          headStyles:{ textColor: inkGray, fontStyle:'bold', fontSize:7.5, cellPadding:{top:0,bottom:5,left:0,right:6} },
+          columnStyles: colStylesExtra||{},
+          didDrawCell: (data)=>{
+            doc.setDrawColor(inkLine);
+            doc.setLineWidth(0.5);
+            doc.line(data.cell.x, data.cell.y + data.cell.height, data.cell.x + data.cell.width, data.cell.y + data.cell.height);
+          }
+        });
+        y = doc.lastAutoTable.finalY + 24;
+      }
+
+      secTitle(`${porPagar.length} correspondido(s) — vão/foram marcados como pagos`, good);
+      tabela(
+        ['Cliente','NIF','Comissão (PDF)','Comissão (registada)','Divergência'],
+        porPagar.map(it=>[ it.entry.cliente||'—', it.pdf.nif||'—', fmtEuro(it.pdf.comissao), fmtEuro(it.entry.comissao), it.divergente?'Sim':'Não' ]),
+        { 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'} }
+      );
+
+      const deOutroMes = naoEncontradas.filter(p=>p.outroMes);
+      const nuncaRegistados = naoEncontradas.filter(p=>!p.outroMes);
+      secTitle(`${deOutroMes.length} linha(s) do PDF de negócio(s) noutro mês — não tocadas de propósito`, inkGray);
+      tabela(
+        ['Cliente (PDF)','NIF','Comissão (PDF)','Mês do negócio na app'],
+        deOutroMes.map(p=>[ p.cliente||'—', p.nif||'—', fmtEuro(p.comissao), mesLabelDe_(p.outroMes) ]),
+        { 2:{halign:'right'} }
+      );
+
+      secTitle(`${nuncaRegistados.length} linha(s) do PDF com NIF nunca registado na app`, serious);
+      tabela(
+        ['Cliente (PDF)','NIF','Tipo Com.','Comissão (PDF)'],
+        nuncaRegistados.map(p=>[ p.cliente||'—', p.nif||'—', p.tipoCom||'—', fmtEuro(p.comissao) ]),
+        { 3:{halign:'right'} }
+      );
+
+      secTitle(`${semPdf.length} negócio(s) lançado(s) sem correspondência no PDF`, serious);
+      tabela(
+        ['Cliente','NIF','Tarifário','Comissão (registada)'],
+        semPdf.map(e=>[ e.cliente||'—', e.nif||'—', e.tarifario||'—', fmtEuro(e.comissao) ]),
+        { 3:{halign:'right'} }
+      );
+
+      secTitle(`${jaPagas.length} já estavam marcados como pagos neste mês`, good);
+      tabela(
+        ['Cliente','NIF','Comissão (PDF)','Data de pagamento'],
+        jaPagas.map(it=>[ it.entry.cliente||'—', it.pdf.nif||'—', fmtEuro(it.pdf.comissao), it.entry.dataPagamento||'—' ]),
+        { 2:{halign:'right'} }
+      );
+
+      const totalPages = doc.internal.getNumberOfPages();
+      for(let p=1; p<=totalPages; p++){
+        doc.setPage(p);
+        doc.setFont('helvetica','normal'); doc.setFontSize(8); doc.setTextColor(inkGray);
+        doc.text(`Página ${p} de ${totalPages}`, pageW/2, pageH-24, { align:'center' });
+      }
+
+      const yF = stamp.getFullYear(), mF = String(stamp.getMonth()+1).padStart(2,'0'), dF = String(stamp.getDate()).padStart(2,'0');
+      doc.save(`importacao_operadora_${mesSelecionado}_${yF}${mF}${dF}.pdf`);
+    } catch(err){
+      areaReservadaStatus.textContent = 'Falha ao gerar PDF: ' + err.message;
+      areaReservadaStatus.className = 'proposal-status error';
+    }
   }
 
   // Grava sequencialmente (não em paralelo) para não sobrecarregar o Apps
