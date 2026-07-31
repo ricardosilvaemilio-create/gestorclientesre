@@ -2244,7 +2244,7 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
       const nuncaRegistados = naoEncontradas.filter(p=>!p.outroMes);
       if(deOutroMes.length){
         html += `<div class="ar-import-section">
-          <h4>${deOutroMes.length} linha(s) do PDF de negócio(s) noutro mês — não tocadas de propósito</h4>
+          <h4>${deOutroMes.length} linha(s) do PDF de negócio(s) noutro mês</h4>
           <p class="ar-import-section-hint">O NIF já existe na app, mas com Data Conclusão de outro mês — o carregamento só valida o mês escolhido (${esc(mesLabel)}), mesmo que o mesmo NIF apareça noutro mês: ${deOutroMes.map(p=>esc((p.cliente||'—') + ' (' + p.nif + ') — ' + mesLabelDe_(p.outroMes))).join(', ')}</p>
         </div>`;
       }
@@ -2388,7 +2388,11 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         doc.text(txt, marginX, y);
         y += 8;
       }
-      function tabela(head, body, colStylesExtra){
+      // highlightIf(rowArray) — quando devolve true, a linha inteira fica a
+      // vermelho (pedido do utilizador, 31/07/2026: "quando a devergência é
+      // SIM coloca todo esse registo a vermelho para realçar"), não só a
+      // célula da Divergência.
+      function tabela(head, body, colStylesExtra, highlightIf){
         if(!body.length){ y += 14; return; }
         doc.autoTable({
           startY: y,
@@ -2399,6 +2403,12 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
           styles:{ font:'helvetica', fontSize:8.5, textColor: inkDark, cellPadding:{top:4,bottom:4,left:0,right:6} },
           headStyles:{ textColor: inkGray, fontStyle:'bold', fontSize:7.5, cellPadding:{top:0,bottom:5,left:0,right:6} },
           columnStyles: colStylesExtra||{},
+          didParseCell: (data)=>{
+            if(data.section==='body' && highlightIf && highlightIf(data.row.raw)){
+              data.cell.styles.textColor = serious;
+              data.cell.styles.fontStyle = 'bold';
+            }
+          },
           didDrawCell: (data)=>{
             doc.setDrawColor(inkLine);
             doc.setLineWidth(0.5);
@@ -2408,16 +2418,17 @@ function(t){t.__bidiEngine__=t.prototype.__bidiEngine__=function(t){var r,n,i,a,
         y = doc.lastAutoTable.finalY + 24;
       }
 
-      secTitle(`${porPagar.length} correspondido(s) — vão/foram marcados como pagos`, good);
+      secTitle(`${porPagar.length} correspondido(s)`, good);
       tabela(
         ['Cliente','NIF','Comissão (PDF)','Comissão (registada)','Divergência'],
         porPagar.map(it=>[ it.entry.cliente||'—', it.pdf.nif||'—', fmtEuro(it.pdf.comissao), fmtEuro(it.entry.comissao), it.divergente?'Sim':'Não' ]),
-        { 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'} }
+        { 2:{halign:'right'}, 3:{halign:'right'}, 4:{halign:'right'} },
+        row => row[4] === 'Sim'
       );
 
       const deOutroMes = naoEncontradas.filter(p=>p.outroMes);
       const nuncaRegistados = naoEncontradas.filter(p=>!p.outroMes);
-      secTitle(`${deOutroMes.length} linha(s) do PDF de negócio(s) noutro mês — não tocadas de propósito`, inkGray);
+      secTitle(`${deOutroMes.length} linha(s) do PDF de negócio(s) noutro mês`, inkGray);
       tabela(
         ['Cliente (PDF)','NIF','Comissão (PDF)','Mês do negócio na app'],
         deOutroMes.map(p=>[ p.cliente||'—', p.nif||'—', fmtEuro(p.comissao), mesLabelDe_(p.outroMes) ]),
